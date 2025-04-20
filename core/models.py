@@ -1,0 +1,114 @@
+from django.db import models
+from django.contrib.auth.models import AbstractUser
+from django.utils.translation import gettext_lazy as _
+
+class User(AbstractUser):
+    """Custom user model with additional fields"""
+    email = models.EmailField(_('email address'), unique=True)
+    bio = models.TextField(_('bio'), blank=True)
+    profile_picture = models.URLField(
+        _('profile picture'),
+        max_length=1000,  # S3 URLs can be quite long
+        blank=True,
+        null=True,
+        help_text='S3 URL for the profile picture'
+    )
+    
+    USERNAME_FIELD = 'email'
+    REQUIRED_FIELDS = ['username']
+
+    def __str__(self):
+        return self.email
+
+class Story(models.Model):
+    """Story model to store user's stories"""
+    title = models.CharField(_('title'), max_length=200)
+    content = models.TextField(_('content'))
+    author = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='stories',
+        verbose_name=_('author')
+    )
+    created_at = models.DateTimeField(_('created at'), auto_now_add=True)
+    updated_at = models.DateTimeField(_('updated at'), auto_now=True)
+    is_public = models.BooleanField(_('is public'), default=False)
+    word_count = models.IntegerField(_('word count'), default=0)
+
+    class Meta:
+        verbose_name = _('story')
+        verbose_name_plural = _('stories')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.title
+
+    def save(self, *args, **kwargs):
+        # Calculate word count before saving
+        self.word_count = len(self.content.split())
+        super().save(*args, **kwargs)
+
+class Scene(models.Model):
+    """Scene model for story segments"""
+    story = models.ForeignKey(
+        Story,
+        on_delete=models.CASCADE,
+        related_name='scenes',
+        verbose_name=_('story')
+    )
+    title = models.CharField(_('title'), max_length=200)
+    content = models.TextField(_('content'))
+    order = models.PositiveIntegerField(_('order'), default=0)
+    created_at = models.DateTimeField(_('created at'), auto_now_add=True)
+    updated_at = models.DateTimeField(_('updated at'), auto_now=True)
+    scene_description = models.TextField(
+        _('scene description'),
+        help_text=_('AI-generated scene description'),
+        blank=True
+    )
+
+    class Meta:
+        verbose_name = _('scene')
+        verbose_name_plural = _('scenes')
+        ordering = ['order']
+
+    def __str__(self):
+        return f"{self.story.title} - Scene {self.order}: {self.title}"
+
+class Media(models.Model):
+    """Media model for story-related images and audio"""
+    MEDIA_TYPE_CHOICES = [
+        ('image', _('Image')),
+        ('audio', _('Audio')),
+    ]
+
+    scene = models.ForeignKey(
+        Scene,
+        on_delete=models.CASCADE,
+        related_name='media',
+        verbose_name=_('scene')
+    )
+    media_type = models.CharField(
+        _('media type'),
+        max_length=10,
+        choices=MEDIA_TYPE_CHOICES
+    )
+    url = models.URLField(
+        _('S3 URL'),
+        max_length=1000,
+        help_text=_('S3 URL for the media file')
+    )
+    description = models.TextField(
+        _('description'),
+        help_text=_('AI-generated media description'),
+        blank=True
+    )
+    created_at = models.DateTimeField(_('created at'), auto_now_add=True)
+
+    class Meta:
+        verbose_name = _('media')
+        verbose_name_plural = _('media')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.get_media_type_display()} for {self.scene.title}"
