@@ -820,7 +820,7 @@ class StoryPreviewPDFView(APIView):
             
             # Send message to SQS queue
             response = sqs_client.send_message(
-                QueueUrl=settings.PDF_GENERATION_QUEUE_URL,
+                QueueUrl=settings.STORY_GENERATION_QUEUE_URL,
                 MessageBody=json.dumps(message)
             )
             
