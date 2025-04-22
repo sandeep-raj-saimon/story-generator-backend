@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Story, Scene, Media
+from .models import Story, Scene, Media, Revision
 
 User = get_user_model()
 
@@ -67,4 +67,17 @@ class StoryCreateSerializer(serializers.ModelSerializer):
         # Get the authenticated user from the request context and set as author
         validated_data['author'] = self.context['request'].user
         # Call parent class's create() method with the validated data including author
-        return super().create(validated_data) 
+        return super().create(validated_data)
+
+class RevisionSerializer(serializers.ModelSerializer):
+    created_by = serializers.StringRelatedField()
+    story = serializers.StringRelatedField()
+
+    class Meta:
+        model = Revision
+        fields = [
+            'id', 'story', 'format', 'sub_format', 'url',
+            'created_at', 'created_by', 'version', 'is_current',
+            'metadata'
+        ]
+        read_only_fields = ['created_at', 'version', 'is_current'] 

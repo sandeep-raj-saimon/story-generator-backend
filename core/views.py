@@ -15,11 +15,12 @@ from django.contrib.auth import authenticate
 # from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
 # from allauth.socialaccount.providers.oauth2.client import OAuth2Client
 # from dj_rest_auth.registration.views import SocialLoginView
-from .models import Story, Scene, Media
+from .models import Story, Scene, Media, Revision
 from .serializers import (
     UserSerializer, UserRegistrationSerializer,
     StorySerializer, StoryCreateSerializer,
-    SceneSerializer, MediaSerializer
+    SceneSerializer, MediaSerializer,
+    RevisionSerializer
 )
 from django.contrib.auth import get_user_model
 import json
@@ -32,7 +33,8 @@ from rest_framework.decorators import action
 import boto3
 from io import BytesIO
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
+from django.db import transaction
 
 User = get_user_model()
 
@@ -187,12 +189,19 @@ class StoryDetailAPIView(APIView):
                 # s3_url = f"https://{settings.IMAGE_AWS_S3_CUSTOM_DOMAIN}/{filename}"
                 s3_url = 'https://story-generation-image.s3.amazonaws.com/story_5/scene_56/image_20250418_150012.png'
                 # Create a new Media instance for the generated image
-                Media.objects.create(
-                    scene=scene,
-                    media_type='image',
-                    url=s3_url,
-                    description=f"AI-generated image for scene: {scene.title}"
-                )
+                with transaction.atomic():
+                    media = Media.objects.create(
+                        scene=scene,
+                        media_type='image',
+                        url=s3_url,
+                        description=f"AI-generated image for scene: {scene.title}"
+                    )
+                    revision = Revision.objects.create(
+                        story=scene.story,
+                        format='image',
+                        url=s3_url,
+                        description=f"AI-generated image for scene: {scene.title}"
+                    )
             
             return Response({'message': 'Images generated successfully for all scenes'})
         except Exception as e:
@@ -329,6 +338,7 @@ class SceneDetailAPIView(APIView):
     PATCH /stories/{story_id}/scenes/{id}/ - Partially update a scene
     DELETE /stories/{story_id}/scenes/{id}/ - Delete a scene
     POST /stories/{story_id}/scenes/{id}/generate-image/ - Generate an image for the scene
+    POST /stories/{story_id}/scenes/{id}/generate-audio/ - Generate an audio for the scene
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -372,62 +382,90 @@ class SceneDetailAPIView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     def post(self, request, story_pk, pk):
-        """Generate an image for the scene."""
+        """Generate media for the scene."""
         scene = self.get_object(story_pk, pk)
         
+        # Get the URL pattern name to determine which endpoint was called
+        url_name = request.resolver_match.url_name
+        
+        if url_name == 'scene-generate-image':
+            return self._generate_image(scene)
+        elif url_name == 'scene-generate-audio':
+            return self._generate_audio(scene)
+        else:
+            return Response(
+                {'error': 'Invalid endpoint'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+    def _generate_image(self, scene):
+        """Generate an image for the scene."""
         try:
             # Initialize S3 client
-            # s3_client = boto3.client(
-            #     's3',
-            #     aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-            #     aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-            #     region_name=settings.AWS_S3_REGION_NAME
-            # )
-            
-            # # Initialize OpenAI client
-            # client = OpenAI(api_key=settings.CHATGPT_OPENAI_API_KEY)
-            
-            # # Generate image using OpenAI's DALL-E
-            # response = client.images.generate(
-            #     model="dall-e-3",
-            #     prompt=f"Generate a detailed, high-quality image for this scene: {scene.content}",
-            #     size="1024x1024",
-            #     quality="standard",
-            #     n=1,
-            #     response_format="url"
-            # )
-            
-            # # Get the image URL from OpenAI
-            # image_url = response.data[0].url
-            
-            # # Download the image
-            # image_response = requests.get(image_url)
-            # image_data = BytesIO(image_response.content)
-            
-            # # Generate a unique filename
-            # timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            # filename = f"story_{scene.story.id}/scene_{scene.id}/image_{timestamp}.png"
-            
-            # # Upload to S3
-            # s3_client.upload_fileobj(
-            #     image_data,
-            #     settings.IMAGE_AWS_STORAGE_BUCKET_NAME,
-            #     filename
-            # )
-            
-            # # Create S3 URL
-            # s3_url = f"https://{settings.IMAGE_AWS_S3_CUSTOM_DOMAIN}/{filename}"
-            # print(s3_url)
-            s3_url = 'https://story-generation-image.s3.amazonaws.com/story_5/scene_56/image_20250418_150012.png'
-            # Create a new Media instance for the generated image
-            media = Media.objects.create(
-                scene=scene,
-                media_type='image',
-                url=s3_url,
-                description=f"AI-generated image for scene: {scene.title}"
+            s3_client = boto3.client(
+                's3',
+                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                region_name=settings.AWS_S3_REGION_NAME
             )
             
+            # Initialize OpenAI client
+            client = OpenAI(api_key=settings.CHATGPT_OPENAI_API_KEY)
+            
+            # Generate image using OpenAI's DALL-E
+            response = client.images.generate(
+                model="dall-e-2",
+                prompt=f"Generate a detailed, high-quality image for this scene: {scene.content}",
+                size="256x256",
+                quality="standard",
+                n=1,
+                response_format="url"
+            )
+            
+            # Get the image URL from OpenAI
+            image_url = response.data[0].url
+            
+            # Download the image
+            image_response = requests.get(image_url)
+            image_data = BytesIO(image_response.content)
+            
+            # Generate a unique filename
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"story_{scene.story.id}/scene_{scene.id}/image_{timestamp}.png"
+            
+            # Upload to S3
+            s3_client.upload_fileobj(
+                image_data,
+                settings.IMAGE_AWS_STORAGE_BUCKET_NAME,
+                filename
+            )
+            
+            # Create S3 URL
+            s3_url = f"https://{settings.IMAGE_AWS_S3_CUSTOM_DOMAIN}/{filename}"
+            
+            media = Media.objects.create(
+                    scene=scene,
+                    media_type='image',
+                    url=s3_url,
+                    description=f"AI-generated image for scene: {scene.title}"
+                )
+            
             return Response(MediaSerializer(media).data)
+        except Exception as e:
+            print(e)
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def _generate_audio(self, scene):
+        """Generate an audio for the scene."""
+        try:
+            # TODO: Implement audio generation logic
+            return Response(
+                {'error': 'Audio generation not implemented yet'},
+                status=status.HTTP_501_NOT_IMPLEMENTED
+            )
         except Exception as e:
             return Response(
                 {'error': str(e)},
@@ -712,12 +750,12 @@ class StoryViewSet(viewsets.ModelViewSet):
                 s3_url = f"https://{settings.AWS_S3_CUSTOM_DOMAIN}/{filename}"
                 
                 # Create a new Media instance for the generated image
-                Media.objects.create(
-                    scene=scene,
-                    media_type='image',
-                    url=s3_url,
-                    description=f"AI-generated image for scene: {scene.title}"
-                )
+                media = Media.objects.create(
+                        scene=scene,
+                        media_type='image',
+                        url=s3_url,
+                        description=f"AI-generated image for scene: {scene.title}"
+                    )
             
             return Response({'message': 'Images generated successfully for all scenes'})
         except Exception as e:
@@ -783,12 +821,11 @@ class SceneViewSet(viewsets.ModelViewSet):
             
             # Create a new Media instance for the generated image
             media = Media.objects.create(
-                scene=scene,
-                media_type='image',
-                url=s3_url,
-                description=f"AI-generated image for scene: {scene.title}"
-            )
-            
+                    scene=scene,
+                    media_type='image',
+                    url=s3_url,
+                    description=f"AI-generated image for scene: {scene.title}"
+                )
             return Response(MediaSerializer(media).data)
         except Exception as e:
             return Response(
@@ -801,8 +838,6 @@ class StoryPreviewPDFView(APIView):
 
     def post(self, request, story_id):
         try:
-            story = Story.objects.get(id=story_id, author=request.user)
-            
             # Initialize SQS client
             sqs_client = boto3.client(
                 'sqs',
@@ -840,3 +875,115 @@ class StoryPreviewPDFView(APIView):
                 {'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+class PreviewStatusView(APIView):
+    def get(self, request, story_id):
+        try:
+            # Get the latest revision for the story
+            revision = Revision.objects.filter(
+                story_id=story_id,
+                story__author=request.user
+            ).order_by('-created_at').first()
+            
+            if not revision:
+                return Response({
+                    'status': 'pending'
+                })
+            
+            # Check if preview exists in S3
+            s3_client = boto3.client(
+                's3',
+                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                region_name=settings.AWS_S3_REGION_NAME
+            )
+            
+            bucket_name = settings.PDF_AWS_STORAGE_BUCKET_NAME
+            prefix = f"story_{story_id}/preview_{revision.id}.pdf"
+            
+            # List objects in S3 with the prefix
+            response = s3_client.list_objects_v2(
+                Bucket=bucket_name,
+                Prefix=prefix
+            )
+            
+            if 'Contents' in response:
+                return Response({
+                    'status': 'complete',
+                    'url': revision.url,
+                    'format': revision.format,
+                    'created_at': revision.created_at
+                })
+            
+            return Response({
+                'status': 'pending'
+            })
+            
+        except Story.DoesNotExist:
+            return Response({
+                'error': 'Story not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            print(e)
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class RevisionListAPIView(APIView):
+    """
+    API endpoint for listing and creating revisions.
+    
+    GET /stories/{story_id}/revisions/ - List all revisions for a story
+    POST /stories/{story_id}/revisions/ - Create a new revision
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, story_id):
+        """List all revisions for a story."""
+        revisions = Revision.objects.filter(story_id=story_id, story__author=request.user)
+        serializer = RevisionSerializer(revisions, many=True)
+        return Response(serializer.data)
+
+    def post(self, request, story_id):
+        """Create a new revision."""
+        story = get_object_or_404(Story, id=story_id, author=request.user)
+        serializer = RevisionSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(story=story, created_by=request.user)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class RevisionCurrentAPIView(APIView):
+    """
+    API endpoint for getting current revisions.
+    
+    GET /stories/{story_id}/revisions/current/ - Get current revisions for a story
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, story_id):
+        """Get current revisions for a story."""
+        revisions = Revision.objects.filter(
+            story_id=story_id,
+            story__author=request.user,
+            is_current=True
+        )
+        serializer = RevisionSerializer(revisions, many=True)
+        return Response(serializer.data)
+
+class RevisionHistoryAPIView(APIView):
+    """
+    API endpoint for getting revision history.
+    
+    GET /stories/{story_id}/revisions/history/ - Get revision history for a story
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, story_id):
+        """Get revision history for a story."""
+        format = request.query_params.get('format')
+        revisions = Revision.objects.filter(story_id=story_id, story__author=request.user)
+        if format:
+            revisions = revisions.filter(format=format)
+        serializer = RevisionSerializer(revisions, many=True)
+        return Response(serializer.data)

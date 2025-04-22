@@ -1,6 +1,8 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.utils.translation import gettext_lazy as _
+from django.conf import settings
+from django.utils import timezone
 
 class User(AbstractUser):
     """Custom user model with additional fields"""
@@ -112,3 +114,24 @@ class Media(models.Model):
 
     def __str__(self):
         return f"{self.get_media_type_display()} for {self.scene.title}"
+
+class Revision(models.Model):
+    FORMAT_CHOICES = [
+        ('pdf', 'PDF'),
+        ('mp4', 'MP4'),
+        ('audio', 'Audio'),
+    ]
+    
+    story = models.ForeignKey(Story, on_delete=models.CASCADE, related_name='revisions')
+    format = models.CharField(max_length=10, choices=FORMAT_CHOICES)
+    sub_format = models.CharField(max_length=50, null=True, blank=True)
+    url = models.URLField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_current = models.BooleanField(default=True)
+    metadata = models.JSONField(default=dict, null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.story.title} - {self.format} ({self.created_at})"
