@@ -14,7 +14,7 @@ from .views import (
     SceneListCreateAPIView, SceneDetailAPIView,
     MediaListCreateAPIView, MediaDetailAPIView,
     UserListCreateAPIView, UserDetailAPIView, CurrentUserAPIView,
-    UserRegistrationAPIView, UserLoginAPIView, StoryPreviewPDFView,
+    UserRegistrationAPIView, UserLoginAPIView, StoryPreviewView,
     PreviewStatusView, RevisionListAPIView, RevisionCurrentAPIView,
     RevisionHistoryAPIView
     # GoogleLogin
@@ -33,7 +33,7 @@ urlpatterns = [
     path('stories/<int:story_pk>/scenes/<int:pk>/', SceneDetailAPIView.as_view(), name='scene-detail'),
     path('stories/<int:story_pk>/scenes/<int:pk>/generate-image/', SceneDetailAPIView.as_view(), name='scene-generate-image'),
     path('stories/<int:story_pk>/scenes/<int:pk>/generate-audio/', SceneDetailAPIView.as_view(), name='scene-generate-audio'),
-    
+
     # Media endpoints
     path('scenes/<int:scene_pk>/media/', MediaListCreateAPIView.as_view(), name='media-list-create'),
     path('scenes/<int:scene_pk>/media/<int:pk>/', MediaDetailAPIView.as_view(), name='media-detail'),
@@ -51,8 +51,10 @@ urlpatterns = [
     path('auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
 
     # Preview endpoints
-    path('stories/<int:story_id>/preview/pdf/', StoryPreviewPDFView.as_view(), name='story-preview-pdf'),
-    path('stories/<int:story_id>/preview-status/', PreviewStatusView.as_view(), name='preview-status'),
+    path('stories/<int:story_id>/preview-pdf/', StoryPreviewView.as_view(), name='story-preview-pdf'),
+    path('stories/<int:story_id>/preview-audio/', StoryPreviewView.as_view(), name='story-preview-audio'),
+    path('stories/<int:story_id>/preview-video/', StoryPreviewView.as_view(), name='story-preview-video'),
+    path('stories/<int:story_id>/preview-status-<str:format>/', PreviewStatusView.as_view(), name='preview-status'),
 
     # Revision endpoints
     path('stories/<int:story_id>/revisions/', RevisionListAPIView.as_view(), name='revision-list'),

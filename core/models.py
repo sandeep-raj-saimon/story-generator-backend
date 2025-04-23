@@ -83,7 +83,12 @@ class Media(models.Model):
         ('image', _('Image')),
         ('audio', _('Audio')),
     ]
-
+    story = models.ForeignKey(
+        Story,
+        on_delete=models.CASCADE,
+        related_name='media',
+        verbose_name=_('story')
+    )
     scene = models.ForeignKey(
         Scene,
         on_delete=models.CASCADE,

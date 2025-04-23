@@ -26,7 +26,6 @@ from django.contrib.auth import get_user_model
 import json
 from openai import OpenAI
 from django.conf import settings
-import openai
 import os
 from rest_framework import viewsets
 from rest_framework.decorators import action
@@ -144,66 +143,33 @@ class StoryDetailAPIView(APIView):
         scenes = story.scenes.all()
         
         try:
-            # Initialize S3 client
-            s3_client = boto3.client(
-                's3',
-                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-                region_name=settings.AWS_S3_REGION_NAME
-            )
-            
-            # Initialize OpenAI client
-            client = OpenAI(api_key=settings.CHATGPT_OPENAI_API_KEY)
-            
             for scene in scenes:
-                # Generate image using OpenAI's DALL-E
-                # response = client.images.generate(
-                #     model="dall-e-3",
-                #     prompt=f"Generate a detailed, high-quality image for this scene: {scene.content}",
-                #     size="1024x1024",
-                #     quality="standard",
-                #     n=1,
-                #     response_format="url"
-                # )
+                # Initialize SQS client
+                sqs_client = boto3.client(
+                    'sqs',
+                    aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                    aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                    region_name=settings.AWS_S3_REGION_NAME
+                )
                 
-                # # Get the image URL from OpenAI
-                # image_url = response.data[0].url
+                # Prepare the message
+                message = {
+                    'story_id': story.id,
+                    'scene_id': scene.id,
+                    'media_type': 'image',
+                    'action': 'generate_media'
+                }
                 
-                # # Download the image
-                # image_response = requests.get(image_url)
-                # image_data = BytesIO(image_response.content)
-                
-                # # Generate a unique filename
-                # timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                # filename = f"story_{story.id}/scene_{scene.id}/image_{timestamp}.png"
-                
-                # # Upload to S3
-                # s3_client.upload_fileobj(
-                #     image_data,
-                #     settings.IMAGE_AWS_STORAGE_BUCKET_NAME,
-                #     filename,
-                #     ExtraArgs={'ACL': 'public-read'}
-                # )
-                
-                # # Create S3 URL
-                # s3_url = f"https://{settings.IMAGE_AWS_S3_CUSTOM_DOMAIN}/{filename}"
-                s3_url = 'https://story-generation-image.s3.amazonaws.com/story_5/scene_56/image_20250418_150012.png'
-                # Create a new Media instance for the generated image
-                with transaction.atomic():
-                    media = Media.objects.create(
-                        scene=scene,
-                        media_type='image',
-                        url=s3_url,
-                        description=f"AI-generated image for scene: {scene.title}"
-                    )
-                    revision = Revision.objects.create(
-                        story=scene.story,
-                        format='image',
-                        url=s3_url,
-                        description=f"AI-generated image for scene: {scene.title}"
-                    )
+                # Send message to SQS queue
+                response = sqs_client.send_message(
+                    QueueUrl=settings.STORY_GENERATION_QUEUE_URL,
+                    MessageBody=json.dumps(message)
+                )
             
-            return Response({'message': 'Images generated successfully for all scenes'})
+            return Response({
+                'message': 'Media generation request sent successfully',
+                'message_id': response['MessageId']
+            })
         except Exception as e:
             return Response(
                 {'error': str(e)},
@@ -383,74 +349,73 @@ class SceneDetailAPIView(APIView):
 
     def post(self, request, story_pk, pk):
         """Generate media for the scene."""
-        scene = self.get_object(story_pk, pk)
+        # scene = self.get_object(story_pk, pk)
         
         # Get the URL pattern name to determine which endpoint was called
         url_name = request.resolver_match.url_name
         
-        if url_name == 'scene-generate-image':
-            return self._generate_image(scene)
-        elif url_name == 'scene-generate-audio':
-            return self._generate_audio(scene)
+        if url_name == 'scene-generate-image' or url_name == 'scene-generate-audio':
+            sqs_client = boto3.client(
+                'sqs',
+                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                region_name=settings.AWS_S3_REGION_NAME
+            )
+            
+            # Prepare the message
+            message = {
+                'story_id': story_pk,
+                'scene_id': pk,
+                'media_type': 'image' if url_name == 'scene-generate-image' else 'audio',
+                'action': 'generate_media'
+            }
+            
+            # Send message to SQS queue
+            response = sqs_client.send_message(
+                QueueUrl=settings.STORY_GENERATION_QUEUE_URL,
+                MessageBody=json.dumps(message)
+            )
+            
+            return Response({
+                'message': 'Media generation request sent successfully',
+                'message_id': response['MessageId']
+            })
         else:
             return Response(
                 {'error': 'Invalid endpoint'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-    def _generate_image(self, scene):
+    def _generate_image(self, story_pk, pk):
         """Generate an image for the scene."""
         try:
-            # Initialize S3 client
-            s3_client = boto3.client(
-                's3',
+            # Initialize SQS client
+            sqs_client = boto3.client(
+                'sqs',
                 aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
                 aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
                 region_name=settings.AWS_S3_REGION_NAME
             )
             
-            # Initialize OpenAI client
-            client = OpenAI(api_key=settings.CHATGPT_OPENAI_API_KEY)
+            # Prepare the message
+            message = {
+                'story_id': story_pk,
+                'scene_id': pk,
+                'media_type': 'image',
+                'action': 'generate_media'
+            }
             
-            # Generate image using OpenAI's DALL-E
-            response = client.images.generate(
-                model="dall-e-2",
-                prompt=f"Generate a detailed, high-quality image for this scene: {scene.content}",
-                size="256x256",
-                quality="standard",
-                n=1,
-                response_format="url"
+            # Send message to SQS queue
+            response = sqs_client.send_message(
+                QueueUrl=settings.STORY_GENERATION_QUEUE_URL,
+                MessageBody=json.dumps(message)
             )
             
-            # Get the image URL from OpenAI
-            image_url = response.data[0].url
+            return Response({
+                'message': 'Media generation request sent successfully',
+                'message_id': response['MessageId']
+            })
             
-            # Download the image
-            image_response = requests.get(image_url)
-            image_data = BytesIO(image_response.content)
-            
-            # Generate a unique filename
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            filename = f"story_{scene.story.id}/scene_{scene.id}/image_{timestamp}.png"
-            
-            # Upload to S3
-            s3_client.upload_fileobj(
-                image_data,
-                settings.IMAGE_AWS_STORAGE_BUCKET_NAME,
-                filename
-            )
-            
-            # Create S3 URL
-            s3_url = f"https://{settings.IMAGE_AWS_S3_CUSTOM_DOMAIN}/{filename}"
-            
-            media = Media.objects.create(
-                    scene=scene,
-                    media_type='image',
-                    url=s3_url,
-                    description=f"AI-generated image for scene: {scene.title}"
-                )
-            
-            return Response(MediaSerializer(media).data)
         except Exception as e:
             print(e)
             return Response(
@@ -458,7 +423,7 @@ class SceneDetailAPIView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-    def _generate_audio(self, scene):
+    def _generate_audio(self, story_pk, pk):
         """Generate an audio for the scene."""
         try:
             # TODO: Implement audio generation logic
@@ -833,11 +798,22 @@ class SceneViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-class StoryPreviewPDFView(APIView):
+class StoryPreviewView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, story_id):
         try:
+            # if the number of media is not equal to the number of scenes, return an error
+            story = Story.objects.get(id=story_id, author=request.user)
+            url_name = request.resolver_match.url_name
+            format = url_name.split('-')[2]
+            format = 'image' if format == 'pdf' else 'audio' if format == 'audio' else 'video' if format == 'video' else 'media'
+            print(format)
+            if story.scenes.count() != story.media.filter(media_type=format).count():
+                return Response(
+                    {'error': 'generate images for all scenes first'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
             # Initialize SQS client
             sqs_client = boto3.client(
                 'sqs',
@@ -850,7 +826,7 @@ class StoryPreviewPDFView(APIView):
             message = {
                 'story_id': story_id,
                 'user_id': request.user.id,
-                'action': 'generate_pdf_preview'
+                'action': 'generate_pdf_preview' if url_name == 'story-preview-pdf' else 'generate_audio_preview' if url_name == 'story-preview-audio' else 'generate_video_preview' if url_name == 'story-preview-video' else 'generate_media'
             }
             
             # Send message to SQS queue
@@ -877,12 +853,17 @@ class StoryPreviewPDFView(APIView):
             )
 
 class PreviewStatusView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
     def get(self, request, story_id):
         try:
+            print("here")
             # Get the latest revision for the story
+            format = request.query_params.get('format')
             revision = Revision.objects.filter(
                 story_id=story_id,
-                story__author=request.user
+                story__author=request.user,
+                format=format
             ).order_by('-created_at').first()
             
             if not revision:
@@ -899,8 +880,7 @@ class PreviewStatusView(APIView):
             )
             
             bucket_name = settings.PDF_AWS_STORAGE_BUCKET_NAME
-            prefix = f"story_{story_id}/preview_{revision.id}.pdf"
-            
+            prefix = f"story_{story_id}/preview_{revision.id}.{format}"
             # List objects in S3 with the prefix
             response = s3_client.list_objects_v2(
                 Bucket=bucket_name,
