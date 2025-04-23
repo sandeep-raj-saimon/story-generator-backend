@@ -34,6 +34,7 @@ from io import BytesIO
 import requests
 from datetime import datetime, timedelta
 from django.db import transaction
+from django.db.models import Q
 
 User = get_user_model()
 
@@ -964,3 +965,65 @@ class RevisionHistoryAPIView(APIView):
             revisions = revisions.filter(format=format)
         serializer = RevisionSerializer(revisions, many=True)
         return Response(serializer.data)
+
+class GeneratedContentListAPIView(APIView):
+    """
+    API endpoint for listing all generated content across stories.
+    
+    GET /generated-content/ - List all generated content for the current user
+    Query Parameters:
+        - page: Page number (default: 1)
+        - page_size: Items per page (default: 10)
+        - search: Search term for filtering by name or story title
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        """List all generated content for the current user."""
+        # Get query parameters
+        page = int(request.query_params.get('page', 1))
+        page_size = int(request.query_params.get('page_size', 10))
+        search = request.query_params.get('search', '')
+
+        # Get all stories by the current user
+        stories = Story.objects.filter(author=request.user)
+        
+        # Get all revisions for these stories
+        revisions = Revision.objects.filter(story__in=stories).select_related('story')
+        
+        # Apply search filter if provided
+        if search:
+            revisions = revisions.filter(
+                Q(story__title__icontains=search) |
+                Q(format__icontains=search)
+            )
+        
+        # Calculate pagination
+        total_count = revisions.count()
+        start = (page - 1) * page_size
+        end = start + page_size
+        
+        # Get paginated revisions
+        paginated_revisions = revisions[start:end]
+        
+        # Format the response
+        content_list = []
+        for revision in paginated_revisions:
+            content_list.append({
+                'id': revision.id,
+                'name': f"{revision.story.title} - {revision.format}",
+                'type': revision.format,
+                'url': revision.url,
+                'createdAt': revision.created_at,
+                'size': revision.metadata.get('size', 0) if revision.metadata else 0,
+                'storyId': revision.story.id,
+                'storyTitle': revision.story.title
+            })
+        
+        return Response({
+            'results': content_list,
+            'total': total_count,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': (total_count + page_size - 1) // page_size
+        })

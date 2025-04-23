@@ -16,7 +16,7 @@ from .views import (
     UserListCreateAPIView, UserDetailAPIView, CurrentUserAPIView,
     UserRegistrationAPIView, UserLoginAPIView, StoryPreviewView,
     PreviewStatusView, RevisionListAPIView, RevisionCurrentAPIView,
-    RevisionHistoryAPIView
+    RevisionHistoryAPIView, GeneratedContentListAPIView
     # GoogleLogin
 )
 
@@ -60,4 +60,7 @@ urlpatterns = [
     path('stories/<int:story_id>/revisions/', RevisionListAPIView.as_view(), name='revision-list'),
     path('stories/<int:story_id>/revisions/current/', RevisionCurrentAPIView.as_view(), name='revision-current'),
     path('stories/<int:story_id>/revisions/history/', RevisionHistoryAPIView.as_view(), name='revision-history'),
+    
+    # Generated content endpoint
+    path('generated-content/', GeneratedContentListAPIView.as_view(), name='generated-content-list'),
 ]
