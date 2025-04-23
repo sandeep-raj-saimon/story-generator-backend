@@ -744,8 +744,6 @@ class SceneViewSet(viewsets.ModelViewSet):
                 aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
                 region_name=settings.AWS_S3_REGION_NAME
             )
-            
-            from openai import OpenAI
 
             # Initialize OpenAI client
             client = OpenAI(
@@ -863,7 +861,7 @@ class PreviewStatusView(APIView):
                 story__author=request.user,
                 format=pk
             ).order_by('-created_at').first()
-            
+            format = 'mp3' if pk == 'audio' else 'mp4' if pk == 'video' else pk
             if not revision:
                 return Response({
                     'status': 'pending'
@@ -878,7 +876,8 @@ class PreviewStatusView(APIView):
             )
             
             bucket_name = settings.PDF_AWS_STORAGE_BUCKET_NAME
-            prefix = f"story_{story_id}/preview_{revision.id}.{pk}"
+            prefix = f"story_{story_id}/preview_{revision.id}.{format}"
+
             # List objects in S3 with the prefix
             response = s3_client.list_objects_v2(
                 Bucket=bucket_name,
