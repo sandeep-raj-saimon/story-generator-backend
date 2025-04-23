@@ -54,7 +54,7 @@ urlpatterns = [
     path('stories/<int:story_id>/preview-pdf/', StoryPreviewView.as_view(), name='story-preview-pdf'),
     path('stories/<int:story_id>/preview-audio/', StoryPreviewView.as_view(), name='story-preview-audio'),
     path('stories/<int:story_id>/preview-video/', StoryPreviewView.as_view(), name='story-preview-video'),
-    path('stories/<int:story_id>/preview-status-<str:format>/', PreviewStatusView.as_view(), name='preview-status'),
+    path('stories/<int:story_id>/preview-status/<str:pk>/', PreviewStatusView.as_view(), name='preview-status'),
 
     # Revision endpoints
     path('stories/<int:story_id>/revisions/', RevisionListAPIView.as_view(), name='revision-list'),

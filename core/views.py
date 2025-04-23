@@ -855,15 +855,13 @@ class StoryPreviewView(APIView):
 class PreviewStatusView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
-    def get(self, request, story_id):
+    def get(self, request, story_id, pk):
         try:
-            print("here")
             # Get the latest revision for the story
-            format = request.query_params.get('format')
             revision = Revision.objects.filter(
                 story_id=story_id,
                 story__author=request.user,
-                format=format
+                format=pk
             ).order_by('-created_at').first()
             
             if not revision:
@@ -880,7 +878,7 @@ class PreviewStatusView(APIView):
             )
             
             bucket_name = settings.PDF_AWS_STORAGE_BUCKET_NAME
-            prefix = f"story_{story_id}/preview_{revision.id}.{format}"
+            prefix = f"story_{story_id}/preview_{revision.id}.{pk}"
             # List objects in S3 with the prefix
             response = s3_client.list_objects_v2(
                 Bucket=bucket_name,
