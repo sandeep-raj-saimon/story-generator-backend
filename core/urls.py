@@ -24,9 +24,10 @@ urlpatterns = [
     # Story endpoints
     path('stories/', StoryListCreateAPIView.as_view(), name='story-list-create'),
     path('stories/<int:pk>/', StoryDetailAPIView.as_view(), name='story-detail'),
-    path('stories/<int:pk>/segment/', StorySegmentAPIView.as_view(), name='story-segment'),
     path('stories/<int:pk>/generate-bulk-image/', StoryDetailAPIView.as_view(), name='story-generate-bulk-image'),
     path('stories/<int:pk>/generate-bulk-audio/', StoryDetailAPIView.as_view(), name='story-generate-bulk-audio'),
+
+    path('stories/<int:pk>/segment/', StorySegmentAPIView.as_view(), name='story-segment'),
 
     # Scene endpoints
     path('stories/<int:story_pk>/scenes/', SceneListCreateAPIView.as_view(), name='scene-list-create'),
@@ -54,6 +55,8 @@ urlpatterns = [
     path('stories/<int:story_id>/preview-pdf/', StoryPreviewView.as_view(), name='story-preview-pdf'),
     path('stories/<int:story_id>/preview-audio/', StoryPreviewView.as_view(), name='story-preview-audio'),
     path('stories/<int:story_id>/preview-video/', StoryPreviewView.as_view(), name='story-preview-video'),
+    path('stories/<int:story_id>/preview-voice/', StoryPreviewView.as_view(), name='story-preview-voice'),
+    
     path('stories/<int:story_id>/preview-status/<str:pk>/', PreviewStatusView.as_view(), name='preview-status'),
 
     # Revision endpoints

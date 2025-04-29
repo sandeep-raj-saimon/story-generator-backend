@@ -31,11 +31,11 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
 class MediaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Media
-        fields = ('id', 'media_type', 'url', 'description', 'created_at')
+        fields = ('id', 'media_type', 'url', 'description', 'created_at', 'is_active')
         read_only_fields = ('id', 'created_at')
 
 class SceneSerializer(serializers.ModelSerializer):
-    media = MediaSerializer(many=True, read_only=True)
+    media = serializers.SerializerMethodField()
 
     class Meta:
         model = Scene
@@ -44,6 +44,10 @@ class SceneSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at', 'media'
         )
         read_only_fields = ('id', 'created_at', 'updated_at')
+
+    def get_media(self, obj):
+        active_media = obj.media.filter(is_active=True)
+        return MediaSerializer(active_media, many=True).data
 
 class StorySerializer(serializers.ModelSerializer):
     author = UserSerializer(read_only=True)

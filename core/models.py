@@ -36,7 +36,7 @@ class Story(models.Model):
     updated_at = models.DateTimeField(_('updated at'), auto_now=True)
     is_public = models.BooleanField(_('is public'), default=False)
     word_count = models.IntegerField(_('word count'), default=0)
-
+    is_active = models.BooleanField(_('is active'), default=True)
     class Meta:
         verbose_name = _('story')
         verbose_name_plural = _('stories')
@@ -63,6 +63,8 @@ class Scene(models.Model):
     order = models.PositiveIntegerField(_('order'), default=0)
     created_at = models.DateTimeField(_('created at'), auto_now_add=True)
     updated_at = models.DateTimeField(_('updated at'), auto_now=True)
+    emotion = models.JSONField(default=list, null=True, blank=True)
+    is_active = models.BooleanField(_('is active'), default=True)
     scene_description = models.TextField(
         _('scene description'),
         help_text=_('AI-generated scene description'),
@@ -111,7 +113,7 @@ class Media(models.Model):
         blank=True
     )
     created_at = models.DateTimeField(_('created at'), auto_now_add=True)
-
+    is_active = models.BooleanField(_('is active'), default=True)
     class Meta:
         verbose_name = _('media')
         verbose_name_plural = _('media')

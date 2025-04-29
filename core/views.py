@@ -139,10 +139,14 @@ class StoryDetailAPIView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     def post(self, request, pk):
-        """Generate images for all scenes in the story."""
+        """Generate image/audio for all scenes in the story."""
+        print("Generating images for all scenes in the story.", request.data)
         story = self.get_object(pk)
+        voice_id = request.data.get('voice_id')
+        url_name = request.resolver_match.url_name
+        media_type = url_name.split('-')[-1]
         scenes = story.scenes.all()
-        
+        scene_ids = [scene.id for scene in scenes]
         try:
             for scene in scenes:
                 # Initialize SQS client
@@ -156,17 +160,20 @@ class StoryDetailAPIView(APIView):
                 # Prepare the message
                 message = {
                     'story_id': story.id,
+                    'voice_id': voice_id,
                     'scene_id': scene.id,
-                    'media_type': 'image',
+                    'media_type': media_type,
                     'action': 'generate_media'
                 }
-                
+                print(f"Message for media generation: {message}")
                 # Send message to SQS queue
                 response = sqs_client.send_message(
                     QueueUrl=settings.STORY_GENERATION_QUEUE_URL,
                     MessageBody=json.dumps(message)
                 )
             
+            # Update old media to inactive
+            Media.objects.filter(story_id=story.id, scene_id__in=scene_ids, is_active=True, media_type=media_type).update(is_active=False)
             return Response({
                 'message': 'Media generation request sent successfully',
                 'message_id': response['MessageId']
@@ -190,11 +197,6 @@ class StorySegmentAPIView(APIView):
         story = get_object_or_404(Story, pk=pk, author=request.user)
         
         try:
-            from openai import OpenAI
-            from django.conf import settings
-            
-            # Initialize OpenAI client
-            print(settings.CHATGPT_OPENAI_API_KEY)
             client = OpenAI(
                 api_key=settings.CHATGPT_OPENAI_API_KEY
             )
@@ -206,7 +208,7 @@ class StorySegmentAPIView(APIView):
             2. The scene content
             3. A brief description
             4. The order number
-            
+            5. The dominant emotion (e.g., happy, tense, sad, hopeful)
             Story: {story.content}
             
             Format the response as JSON with the following structure:
@@ -216,6 +218,7 @@ class StorySegmentAPIView(APIView):
                         "title": "Scene title",
                         "content": "Scene content",
                         "scene_description": "Brief description",
+                        "emotion": ["emotion1", "emotion2", "emotion3" and so on],
                         "order": 1
                     }},
                     ...
@@ -256,7 +259,8 @@ class StorySegmentAPIView(APIView):
                     title=scene_data['title'],
                     content=scene_data['content'],
                     scene_description=scene_data['scene_description'],
-                    order=scene_data['order']
+                    order=scene_data['order'],
+                    emotion=scene_data['emotion']
                 )
                 created_scenes.append(SceneSerializer(scene).data)
             
@@ -350,8 +354,6 @@ class SceneDetailAPIView(APIView):
 
     def post(self, request, story_pk, pk):
         """Generate media for the scene."""
-        # scene = self.get_object(story_pk, pk)
-        
         # Get the URL pattern name to determine which endpoint was called
         url_name = request.resolver_match.url_name
         
@@ -371,6 +373,21 @@ class SceneDetailAPIView(APIView):
                 'action': 'generate_media'
             }
             
+            # Add voice_id for audio generation
+            if url_name == 'scene-generate-audio':
+                try:
+                    voice_id = request.data.get('voice_id')
+                    if not voice_id:
+                        return Response(
+                            {'error': 'voice_id is required for audio generation'},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+                    message['voice_id'] = voice_id
+                except Exception as e:
+                    return Response(
+                        {'error': f'Error processing request data: {str(e)}'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
             # Send message to SQS queue
             response = sqs_client.send_message(
                 QueueUrl=settings.STORY_GENERATION_QUEUE_URL,
@@ -807,8 +824,8 @@ class StoryPreviewView(APIView):
             url_name = request.resolver_match.url_name
             format = url_name.split('-')[2]
             format = 'image' if format == 'pdf' else 'audio' if format == 'audio' else 'video' if format == 'video' else 'media'
-            print(format)
-            if story.scenes.count() != story.media.filter(media_type=format).count():
+            
+            if story.scenes.count() != story.media.filter(media_type=format, is_active=True).count():
                 return Response(
                     {'error': 'generate images for all scenes first'},
                     status=status.HTTP_400_BAD_REQUEST
@@ -845,7 +862,6 @@ class StoryPreviewView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
         except Exception as e:
-            print(e)
             return Response(
                 {'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
