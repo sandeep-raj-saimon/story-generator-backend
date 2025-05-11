@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
+from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 
 # from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
@@ -627,7 +628,7 @@ class UserRegistrationAPIView(APIView):
     POST /auth/register/ - Register a new user
     """
     permission_classes = [permissions.AllowAny]
-    @csrf_exempt
+    @method_decorator(csrf_exempt)
     def post(self, request):
         """Register a new user."""
         serializer = UserRegistrationSerializer(data=request.data)
@@ -652,7 +653,7 @@ class UserLoginAPIView(APIView):
     POST /auth/login/ - Login a user
     """
     permission_classes = [permissions.AllowAny]
-    @csrf_exempt
+    @method_decorator(csrf_exempt)
     def post(self, request):
         """Login a user."""
         email = request.data.get('email')
