@@ -184,8 +184,7 @@ SIMPLE_JWT = {
 CORS_ALLOW_ALL_ORIGINS = True  # For development only
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",  # Vite default port
-    "http://127.0.0.1:5173",
-    "https://story-generator-production-a004.up.railway.app"
+    "http://127.0.0.1:5173"
 ]
 
 # Custom user model
@@ -222,3 +221,5 @@ CHATGPT_OPENAI_API_KEY = os.getenv('CHATGPT_OPENAI_API_KEY')
 
 # SQS Queue URLs
 STORY_GENERATION_QUEUE_URL = os.getenv('STORY_GENERATION_QUEUE_URL')
+
+CSRF_TRUSTED_ORIGINS = ['http://localhost:5173']
