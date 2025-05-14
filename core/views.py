@@ -621,6 +621,7 @@ class CurrentUserAPIView(APIView):
         serializer = UserSerializer(request.user)
         return Response(serializer.data)
 
+@method_decorator(csrf_exempt, name='dispatch')
 class UserRegistrationAPIView(APIView):
     """
     API endpoint for user registration.
@@ -628,7 +629,6 @@ class UserRegistrationAPIView(APIView):
     POST /auth/register/ - Register a new user
     """
     permission_classes = [permissions.AllowAny]
-    @method_decorator(csrf_exempt)
     def post(self, request):
         """Register a new user."""
         serializer = UserRegistrationSerializer(data=request.data)
@@ -646,6 +646,7 @@ class UserRegistrationAPIView(APIView):
         print(serializer.errors)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+@method_decorator(csrf_exempt, name='dispatch')
 class UserLoginAPIView(APIView):
     """
     API endpoint for user login.
@@ -653,7 +654,7 @@ class UserLoginAPIView(APIView):
     POST /auth/login/ - Login a user
     """
     permission_classes = [permissions.AllowAny]
-    @method_decorator(csrf_exempt)
+
     def post(self, request):
         """Login a user."""
         email = request.data.get('email')
