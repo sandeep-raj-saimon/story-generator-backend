@@ -209,7 +209,16 @@ class StorySegmentAPIView(APIView):
             Segment the following story into logical scenes. For each scene, provide:
             1. A title
             2. The scene content
-            3. A brief description
+            3. A highly detailed visual description of the scene, including:
+               - Physical setting and environment (indoor/outdoor, time of day, weather, etc.)
+               - Background elements and surroundings (buildings, nature, furniture, etc.)
+               - Lighting conditions and atmosphere
+               - Any notable sounds or ambient noise
+               - Character positions, expressions, and clothing
+               - Important objects and their placement
+               - Color schemes and textures
+               - Camera angle/perspective for the scene
+               - Any special effects or unique visual elements
             4. The order number
             5. The dominant emotion (e.g., happy, tense, sad, hopeful)
             Story: {story.content}
