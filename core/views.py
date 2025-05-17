@@ -83,7 +83,7 @@ class StoryListCreateAPIView(APIView):
 
     def get(self, request):
         """List all stories for the current user."""
-        stories = Story.objects.filter(author=request.user)
+        stories = Story.objects.filter(author=request.user, is_active=True)
         serializer = StorySerializer(stories, many=True)
         return Response(serializer.data)
 
@@ -129,11 +129,14 @@ class StoryDetailAPIView(APIView):
     def patch(self, request, pk):
         """Partially update a story."""
         story = self.get_object(pk)
-        serializer = StorySerializer(story, data=request.data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        if not story.is_active:
+            return Response(
+                {"error": "Story is not active and cannot be updated"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        story.is_active = False
+        story.save()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     def delete(self, request, pk):
         """Delete a story."""
