@@ -112,6 +112,12 @@ class Media(models.Model):
         help_text=_('AI-generated media description'),
         blank=True
     )
+    request_id = models.CharField(
+        _('request id'),
+        max_length=200,
+        null=True,
+        blank=True
+    )
     created_at = models.DateTimeField(_('created at'), auto_now_add=True)
     is_active = models.BooleanField(_('is active'), default=True)
     class Meta:

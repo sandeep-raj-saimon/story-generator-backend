@@ -151,30 +151,44 @@ class StoryDetailAPIView(APIView):
         scenes = story.scenes.all()
         scene_ids = [scene.id for scene in scenes]
         try:
-            for scene in scenes:
-                # Initialize SQS client
-                sqs_client = boto3.client(
-                    'sqs',
-                    aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-                    aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-                    region_name=settings.AWS_S3_REGION_NAME
-                )
-                
-                # Prepare the message
+            # Initialize SQS client
+            sqs_client = boto3.client(
+                'sqs',
+                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                region_name=settings.AWS_S3_REGION_NAME
+            )
+                    
+            if media_type == 'image':
+                # incase of image, we can send independent messages for each scene
+                for scene in scenes:
+                    # Prepare the message
+                    message = {
+                        'story_id': story.id,
+                        'voice_id': voice_id,
+                        'scene_id': scene.id,
+                        'media_type': media_type,
+                        'action': 'generate_media'
+                    }
+                    print(f"Message for media generation: {message}")
+                    # Send message to SQS queue
+                    response = sqs_client.send_message(
+                        QueueUrl=settings.STORY_GENERATION_QUEUE_URL,
+                        MessageBody=json.dumps(message)
+                    )
+            elif media_type == 'audio':
+                # incase of audio, we have to single message for all scenes
                 message = {
+                    'user_id': request.user.id,
                     'story_id': story.id,
                     'voice_id': voice_id,
-                    'scene_id': scene.id,
                     'media_type': media_type,
-                    'action': 'generate_media'
+                    'action': 'generate_entire_audio'
                 }
-                print(f"Message for media generation: {message}")
-                # Send message to SQS queue
                 response = sqs_client.send_message(
                     QueueUrl=settings.STORY_GENERATION_QUEUE_URL,
                     MessageBody=json.dumps(message)
                 )
-            
             # Update old media to inactive
             Media.objects.filter(story_id=story.id, scene_id__in=scene_ids, is_active=True, media_type=media_type).update(is_active=False)
             return Response({
@@ -368,7 +382,7 @@ class SceneDetailAPIView(APIView):
         """Generate media for the scene."""
         # Get the URL pattern name to determine which endpoint was called
         url_name = request.resolver_match.url_name
-        
+        media_type = url_name.split('-')[-1]
         if url_name == 'scene-generate-image' or url_name == 'scene-generate-audio':
             sqs_client = boto3.client(
                 'sqs',
@@ -394,18 +408,37 @@ class SceneDetailAPIView(APIView):
                             {'error': 'voice_id is required for audio generation'},
                             status=status.HTTP_400_BAD_REQUEST
                         )
+                    # check for previous and next media of the story, order by scene_id
+                    # Get previous and next media ordered by scene_id
+                    previous_request_ids = list(Media.objects.filter(
+                        story_id=story_pk,
+                        scene_id__lt=pk,
+                        media_type='audio',
+                        is_active=True
+                    ).order_by('scene__id').values_list('request_id', flat=True))
+                    
+                    next_request_ids = list(Media.objects.filter(
+                        story_id=story_pk,
+                        scene_id__gt=pk,
+                        media_type='audio',
+                        is_active=True
+                    ).order_by('scene__id').values_list('request_id', flat=True))
+                    
+                    message['previous_request_ids'] = previous_request_ids if previous_request_ids else None
+                    message['next_request_ids'] = next_request_ids if next_request_ids else None
                     message['voice_id'] = voice_id
                 except Exception as e:
                     return Response(
                         {'error': f'Error processing request data: {str(e)}'},
                         status=status.HTTP_400_BAD_REQUEST
                     )
+            print(message)
             # Send message to SQS queue
             response = sqs_client.send_message(
                 QueueUrl=settings.STORY_GENERATION_QUEUE_URL,
                 MessageBody=json.dumps(message)
             )
-            
+            Media.objects.filter(story_id=story_pk, scene_id=pk, media_type=media_type, is_active=True).update(is_active=False)
             return Response({
                 'message': 'Media generation request sent successfully',
                 'message_id': response['MessageId']
