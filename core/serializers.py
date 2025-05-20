@@ -1,14 +1,25 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Story, Scene, Media, Revision
+from .models import Story, Scene, Media, Revision, Credits, CreditTransaction
 
 User = get_user_model()
 
+class CreditSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Credits
+        fields = ('credits_remaining', 'updated_at')
+
 class UserSerializer(serializers.ModelSerializer):
+    credits = serializers.SerializerMethodField()
+
     class Meta:
         model = User
-        fields = ('id', 'username', 'email', 'bio', 'profile_picture')
+        fields = ('id', 'username', 'email', 'bio', 'profile_picture', 'credits')
         read_only_fields = ('id',)
+
+    def get_credits(self, obj):
+        credit = Credits.objects.filter(user=obj, is_active=True).first()
+        return CreditSerializer(credit).data if credit else {'credits_remaining': 0, 'updated_at': None}
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
     """
@@ -18,7 +29,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ('username', 'email', 'password')
+        fields = ('username', 'email', 'password', 'credits')
 
     def create(self, validated_data):
         user = User.objects.create_user(

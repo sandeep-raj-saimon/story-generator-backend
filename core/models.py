@@ -148,3 +148,67 @@ class Revision(models.Model):
 
     def __str__(self):
         return f"{self.story.title} - {self.format} ({self.created_at})"
+
+class Credits(models.Model):
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='credits',
+        verbose_name=_('user')
+    )
+    credits_remaining = models.IntegerField(
+        _('credits remaining'),
+        default=300,
+        help_text=_('Number of credits remaining for the user')
+    )
+    created_at = models.DateTimeField(_('created at'), auto_now_add=True)
+    updated_at = models.DateTimeField(_('updated at'), auto_now=True)
+    is_active = models.BooleanField(_('is active'), default=True)
+
+    class Meta:
+        verbose_name = _('credit')
+        verbose_name_plural = _('credits')
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return f"{self.user.username} - {self.credits_remaining} credits"
+
+
+class CreditTransaction(models.Model):
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='credit_transactions',
+        verbose_name=_('user')
+    )
+    scene = models.ForeignKey(
+        'Scene',
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='credit_transactions',
+        verbose_name=_('scene')
+    )
+    credits_used = models.PositiveIntegerField(
+        _('credits used'),
+        help_text=_('Number of credits used in this transaction')
+    )
+    transaction_type = models.CharField(
+        _('transaction type'),
+        max_length=20,
+        choices=[
+            ('debit', 'Debit'),
+            ('credit', 'Credit'),
+        ],
+        default='debit'
+    )
+    created_at = models.DateTimeField(_('created at'), auto_now_add=True)
+    updated_at = models.DateTimeField(_('updated at'), auto_now=True)
+
+    class Meta:
+        verbose_name = _('credit transaction')
+        verbose_name_plural = _('credit transactions')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.user.username} - {self.credits_used} credits ({self.transaction_type})"
+

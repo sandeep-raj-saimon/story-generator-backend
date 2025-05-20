@@ -1092,3 +1092,16 @@ class GeneratedContentListAPIView(APIView):
             'page_size': page_size,
             'total_pages': (total_count + page_size - 1) // page_size
         })
+
+class ProfileAPIView(APIView):
+    """
+    API endpoint for getting user profile information.
+    
+    GET /profile/ - Get user profile information
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        """Get user profile information."""
+        serializer = UserSerializer(request.user)
+        return Response(serializer.data)

@@ -16,7 +16,7 @@ from .views import (
     UserListCreateAPIView, UserDetailAPIView, CurrentUserAPIView,
     UserRegistrationAPIView, UserLoginAPIView, StoryPreviewView,
     PreviewStatusView, RevisionListAPIView, RevisionCurrentAPIView,
-    RevisionHistoryAPIView, GeneratedContentListAPIView
+    RevisionHistoryAPIView, GeneratedContentListAPIView, ProfileAPIView
     # GoogleLogin
 )
 
@@ -66,4 +66,5 @@ urlpatterns = [
     
     # Generated content endpoint
     path('generated-content/', GeneratedContentListAPIView.as_view(), name='generated-content-list'),
+    path('profile/', ProfileAPIView.as_view(), name='profile'),
 ]
