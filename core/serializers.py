@@ -29,13 +29,19 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ('username', 'email', 'password', 'credits')
+        fields = ('username', 'email', 'password')
 
     def create(self, validated_data):
         user = User.objects.create_user(
             username=validated_data['username'],
             email=validated_data['email'],
             password=validated_data['password']
+        )
+        # Create initial credits for the user
+        Credits.objects.create(
+            user=user,
+            credits_remaining=300,  # Default credits
+            is_active=True
         )
         return user
 
