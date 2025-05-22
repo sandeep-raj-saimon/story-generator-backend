@@ -14,6 +14,11 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated, IsAdminUser
+import redis
+import os
+import json
 
 # from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
 # from allauth.socialaccount.providers.oauth2.client import OAuth2Client
@@ -41,36 +46,141 @@ from django.db.models import Q
 
 User = get_user_model()
 
-# class GoogleLogin(SocialLoginView):
-#     """
-#     API endpoint for Google SSO login.
+# Initialize Redis client
+redis_client = redis.Redis(
+    host=os.getenv('REDISHOST'),
+    port=os.getenv('REDISPORT'),
+    password=os.getenv('REDISPASSWORD')
+)
+
+# Default pricing configurations
+DEFAULT_PRICING = {
+    'com': {
+        'currency': '$',
+        'plans': [
+            {
+                'id': 1,
+                'name': 'Free',
+                'price': 0,
+                'credits': 300,
+                'features': [
+                    '300 credits per month',
+                    'Basic story creation'
+                ]
+            },
+            {
+                'id': 2,
+                'name': 'Standard',
+                'price': 4.99,
+                'credits': 1000,
+                'features': [
+                    '1000 credits',
+                    'Only Image generation',
+                    'Export to PDF format'
+                ]
+            },
+            {
+                'id': 3,
+                'name': 'Premium',
+                'price': 9.99,
+                'credits': 3000,
+                'features': [
+                    '3000 credits',
+                    'Image and Audio generation',
+                    'Export to PDF and Mp3 formats'
+                ]
+            }
+        ]
+    },
+    'in': {
+        'currency': '₹',
+        'plans': [
+            {
+                'id': 1,
+                'name': 'Free',
+                'price': 0,
+                'credits': 300,
+                'features': [
+                    '300 credits per month',
+                    'Basic story creation'
+                ]
+            },
+            {
+                'id': 2,
+                'name': 'Standard',
+                'price': 99,
+                'credits': 1000,
+                'features': [
+                    '1000 credits',
+                    'Only Image generation',
+                    'Export to PDF format'
+                ]
+            },
+            {
+                'id': 3,
+                'name': 'Premium',
+                'price': 249,
+                'credits': 3000,
+                'features': [
+                    '3000 credits',
+                    'Image and Audio generation',
+                    'Export to PDF and Mp3 formats'
+                ]
+            }
+        ]
+    }
+}
+
+class PricingConfigView(APIView):
+    """
+    API endpoint for managing pricing configurations.
     
-#     POST /auth/google/ - Login with Google
-#     """
-#     adapter_class = GoogleOAuth2Adapter
-#     callback_url = "http://localhost:3000"  # Your frontend URL
-#     client_class = OAuth2Client
+    GET /pricing/config/ - Get pricing configuration for a domain
+    """
+    permission_classes = [permissions.AllowAny]
 
-#     def post(self, request, *args, **kwargs):
-#         """Handle Google SSO login."""
-#         response = super().post(request, *args, **kwargs)
-        
-#         if response.status_code == 200:
-#             # Get the user from the response
-#             user = request.user
-            
-#             # Generate JWT tokens
-#             refresh = RefreshToken.for_user(user)
-            
-#             # Add tokens to the response
-#             response.data.update({
-#                 'refresh': str(refresh),
-#                 'access': str(refresh.access_token),
-#             })
-        
-#         return response
+    def get(self, request):
+        """Get pricing configuration for the current domain."""
+        domain = request.query_params.get('domain', 'com')
+        if not domain:
+            return Response({'error': 'Domain is required'}, status=400)
 
-# Create your views here.
+        # Try to get pricing from Redis
+        pricing_key = f'pricing:{domain}'
+        pricing_data = redis_client.get(pricing_key)
+
+        if pricing_data:
+            return Response(json.loads(pricing_data))
+        
+        # If not in Redis, use default pricing
+        if domain in DEFAULT_PRICING:
+            # Store in Redis for future use
+            redis_client.set(pricing_key, json.dumps(DEFAULT_PRICING[domain]))
+            return Response(DEFAULT_PRICING[domain])
+        
+        # If domain not found, return .com pricing
+        return Response(DEFAULT_PRICING['com'])
+
+class PricingConfigUpdateView(APIView):
+    """
+    API endpoint for updating pricing configurations.
+    
+    POST /pricing/config/update/ - Update pricing configuration for a domain (admin only)
+    """
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request):
+        """Update pricing configuration for a domain (admin only)."""
+        domain = request.data.get('domain')
+        pricing = request.data.get('pricing')
+
+        if not domain or not pricing:
+            return Response({'error': 'Domain and pricing are required'}, status=400)
+
+        pricing_key = f'pricing:{domain}'
+        redis_client.set(pricing_key, json.dumps(pricing))
+        
+        return Response({'message': 'Pricing configuration updated successfully'})
 
 class StoryListCreateAPIView(APIView):
     """

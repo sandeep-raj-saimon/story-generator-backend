@@ -16,7 +16,8 @@ from .views import (
     UserListCreateAPIView, UserDetailAPIView, CurrentUserAPIView,
     UserRegistrationAPIView, UserLoginAPIView, StoryPreviewView,
     PreviewStatusView, RevisionListAPIView, RevisionCurrentAPIView,
-    RevisionHistoryAPIView, GeneratedContentListAPIView, ProfileAPIView
+    RevisionHistoryAPIView, GeneratedContentListAPIView, ProfileAPIView,
+    PricingConfigView, PricingConfigUpdateView
     # GoogleLogin
 )
 
@@ -67,4 +68,8 @@ urlpatterns = [
     # Generated content endpoint
     path('generated-content/', GeneratedContentListAPIView.as_view(), name='generated-content-list'),
     path('profile/', ProfileAPIView.as_view(), name='profile'),
+    path('pricing/config/', PricingConfigView.as_view(), name='get_pricing_config'),
+    path('pricing/config/update/', PricingConfigUpdateView.as_view(), name='update_pricing_config'),
+
+    # Payment endpoints
 ]
