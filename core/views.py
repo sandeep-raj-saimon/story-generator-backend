@@ -55,13 +55,25 @@ DEFAULT_PRICING = {
         'currency': '$',
         'plans': [
             {
-                'id': 1,
-                'name': 'Free',
-                'price': 0,
-                'credits': 300,
+                'id': 4,
+                'name': 'Studio',
+                'price': 29.99,
+                'credits': 7500,
                 'features': [
-                    '300 credits per month',
-                    'Basic story creation'
+                    '7500 credits',
+                    'Image and Audio generation',
+                    'Export to PDF and Mp3 formats'
+                ]
+            },
+            {
+                'id': 3,
+                'name': 'Pro',
+                'price': 14.99,
+                'credits': 3000,
+                'features': [
+                    '3000 credits',
+                    'Image and Audio generation',
+                    'Export to PDF and Mp3 formats'
                 ]
             },
             {
@@ -76,14 +88,13 @@ DEFAULT_PRICING = {
                 ]
             },
             {
-                'id': 3,
-                'name': 'Premium',
-                'price': 9.99,
-                'credits': 3000,
+                'id': 1,
+                'name': 'Free',
+                'price': 0,
+                'credits': 300,
                 'features': [
-                    '3000 credits',
-                    'Image and Audio generation',
-                    'Export to PDF and Mp3 formats'
+                    '300 credits per month',
+                    'Basic story creation'
                 ]
             }
         ]
@@ -92,13 +103,25 @@ DEFAULT_PRICING = {
         'currency': '₹',
         'plans': [
             {
-                'id': 1,
-                'name': 'Free',
-                'price': 0,
-                'credits': 300,
+                'id': 4,
+                'name': 'Studio',
+                'price': 499,
+                'credits': 7500,
                 'features': [
-                    '300 credits per month',
-                    'Basic story creation'
+                    '7500 credits',
+                    'Image and Audio generation',
+                    'Export to PDF and Mp3 formats'
+                ]
+            },
+            {
+                'id': 3,
+                'name': 'Premium',
+                'price': 249,
+                'credits': 3000,
+                'features': [
+                    '3000 credits',
+                    'Image and Audio generation',
+                    'Export to PDF and Mp3 formats'
                 ]
             },
             {
@@ -113,14 +136,13 @@ DEFAULT_PRICING = {
                 ]
             },
             {
-                'id': 3,
-                'name': 'Premium',
-                'price': 249,
-                'credits': 3000,
+                'id': 1,
+                'name': 'Free',
+                'price': 0,
+                'credits': 300,
                 'features': [
-                    '3000 credits',
-                    'Image and Audio generation',
-                    'Export to PDF and Mp3 formats'
+                    '300 credits per month',
+                    'Basic story creation'
                 ]
             }
         ]
@@ -331,7 +353,7 @@ class StorySegmentAPIView(APIView):
             prompt = f"""
             Segment the following story into logical scenes. For each scene, provide:
             1. A title
-            2. The scene content
+            2. The scene content, which should be part of the story content
             3. A highly detailed visual description of the scene, including:
                - Physical setting and environment (indoor/outdoor, time of day, weather, etc.)
                - Background elements and surroundings (buildings, nature, furniture, etc.)
@@ -422,7 +444,7 @@ class SceneListCreateAPIView(APIView):
 
     def get(self, request, story_pk):
         """List all scenes for a story."""
-        scenes = Scene.objects.filter(story_id=story_pk, story__author=request.user)
+        scenes = Scene.objects.filter(story_id=story_pk, story__author=request.user, is_active=True)
         serializer = SceneSerializer(scenes, many=True)
         return Response(serializer.data)
 
@@ -488,6 +510,7 @@ class SceneDetailAPIView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     def post(self, request, story_pk, pk):
+        # return Response({'error': 'Invalid endpoint'}, status=status.HTTP_400_BAD_REQUEST)
         """Generate media for the scene."""
         # Get the URL pattern name to determine which endpoint was called
         url_name = request.resolver_match.url_name

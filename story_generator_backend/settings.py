@@ -46,7 +46,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'corsheaders',
     'rest_framework_simplejwt',
-    
+    'rest_framework.authtoken',
     # Local apps
     'core'
 ]
@@ -57,9 +57,10 @@ MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',  # CORS middleware
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.auth.middleware.AuthenticationMiddleware',  # Authentication middleware must come first
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'core.middleware.CreditDeductionMiddleware',  # Credit deduction middleware after authentication
 ]
 
 ROOT_URLCONF = 'story_generator_backend.urls'
