@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Story, Scene, Media, Revision, Credits, CreditTransaction
+from .models import Story, Scene, Media, Revision, Credits, CreditTransaction, Order, Payment
 
 User = get_user_model()
 
@@ -101,3 +101,21 @@ class RevisionSerializer(serializers.ModelSerializer):
             'metadata'
         ]
         read_only_fields = ['created_at', 'version', 'is_current'] 
+
+class OrderSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Order
+        fields = ['id', 'user', 'amount', 'status', 'created_at', 'updated_at', 'order_id']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+class PaymentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Payment
+        fields = ['id', 'order', 'payment_id', 'payment_status', 'payment_signature', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+class CreditTransactionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CreditTransaction
+        fields = ['id', 'user', 'credits_used', 'transaction_type', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']

@@ -9,17 +9,7 @@ from rest_framework_simplejwt.views import (
     TokenObtainPairView,
     TokenRefreshView,
 )
-from .views import (
-    StoryListCreateAPIView, StoryDetailAPIView, StorySegmentAPIView,
-    SceneListCreateAPIView, SceneDetailAPIView,
-    MediaListCreateAPIView, MediaDetailAPIView,
-    UserListCreateAPIView, UserDetailAPIView, CurrentUserAPIView,
-    UserRegistrationAPIView, UserLoginAPIView, StoryPreviewView,
-    PreviewStatusView, RevisionListAPIView, RevisionCurrentAPIView,
-    RevisionHistoryAPIView, GeneratedContentListAPIView, ProfileAPIView,
-    PricingConfigView, PricingConfigUpdateView
-    # GoogleLogin
-)
+from .views import *
 
 urlpatterns = [
     # Story endpoints
@@ -69,7 +59,7 @@ urlpatterns = [
     path('generated-content/', GeneratedContentListAPIView.as_view(), name='generated-content-list'),
     path('profile/', ProfileAPIView.as_view(), name='profile'),
     path('pricing/config/', PricingConfigView.as_view(), name='get_pricing_config'),
-    path('pricing/config/update/', PricingConfigUpdateView.as_view(), name='update_pricing_config'),
-
-    # Payment endpoints
+    path('pricing/config/update/', PricingConfigUpdateView.as_view(), name='update_pricing_config'),    
+    path('payment/create-order/', CreateOrderView.as_view(), name='create_order'),
+    path('payment/verify/', PaymentView.as_view(), name='verify_payment'),
 ]

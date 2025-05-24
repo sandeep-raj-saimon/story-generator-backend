@@ -19,17 +19,13 @@ from rest_framework.permissions import IsAuthenticated, IsAdminUser
 import redis
 import os
 import json
-
+import razorpay
+import uuid
 # from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
 # from allauth.socialaccount.providers.oauth2.client import OAuth2Client
 # from dj_rest_auth.registration.views import SocialLoginView
 from .models import Story, Scene, Media, Revision
-from .serializers import (
-    UserSerializer, UserRegistrationSerializer,
-    StorySerializer, StoryCreateSerializer,
-    SceneSerializer, MediaSerializer,
-    RevisionSerializer
-)
+from .serializers import *
 from django.contrib.auth import get_user_model
 import json
 from openai import OpenAI
@@ -1208,10 +1204,92 @@ class ProfileAPIView(APIView):
     API endpoint for getting user profile information.
     
     GET /profile/ - Get user profile information
-    """
+"""
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
         """Get user profile information."""
         serializer = UserSerializer(request.user)
         return Response(serializer.data)
+    
+class CreateOrderView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        """Create an order."""
+        plan_id = request.query_params.get('plan_id')
+        if plan_id is None or plan_id == '' or plan_id == '1':
+            return Response({'error': 'Invalid plan'}, status=status.HTTP_400_BAD_REQUEST)
+        domain = request.query_params.get('domain')
+        if domain == 'in':
+            currency = 'INR'
+        else:
+            currency = 'USD'
+        plans = DEFAULT_PRICING[domain]['plans']
+        print(plans, plan_id, domain)
+        plan = next((p for p in plans if p['id'] == int(plan_id)), None)
+        if not plan:
+            return Response({'error': 'Invalid plan'}, status=status.HTTP_400_BAD_REQUEST)
+        amount = plan['price']
+        receipt = redis_client.incr('prod_razorpay_last_order_id') if redis_client.get('is_razorpay_test') else redis_client.incr('prod_razorpay_last_order_id')
+        print(amount, currency, receipt)
+
+        client = razorpay.Client(auth=(settings.TEST_RAZORPAY_KEY_ID, settings.TEST_RAZORPAY_KEY_SECRET)) if redis_client.get('is_razorpay_test') else razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
+        order_params = {
+            'amount': amount*100,
+            'currency': currency,
+            'receipt': f'order_rcptid_{receipt}',
+            'notes': []
+        }
+        print(order_params)
+        order = client.order.create(order_params)
+        order_obj = OrderSerializer(data={'user': request.user.id, 'amount': amount, 'status': 'pending', 'order_id': order['id']})
+        if order_obj.is_valid():
+            order_obj.save()
+            return Response(order_obj.data, status=status.HTTP_201_CREATED)
+        else:
+            return Response(order_obj.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+class PaymentView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        """Create a payment."""
+        client = razorpay.Client(auth=(settings.TEST_RAZORPAY_KEY_ID, settings.TEST_RAZORPAY_KEY_SECRET))
+        request.body = request.data
+
+        is_verified= client.utility.verify_payment_signature({
+        'razorpay_order_id': request.data.get('order_id'),
+        'razorpay_payment_id': request.data.get('razorpay_payment_id'),
+        'razorpay_signature': request.data.get('razorpay_signature')
+        })
+
+        if is_verified:
+            try:
+                with transaction.atomic():
+                    order = Order.objects.get(order_id=request.data.get('order_id'))
+                    order.status = 'paid'
+                    order.save()
+
+                    credit_to_be_added = next(p for p in DEFAULT_PRICING[request.query_params.get('domain')]['plans'] if p['id'] == int(request.data.get('plan_id')))['credits']
+                    print('credit_to_be_added', credit_to_be_added, request.query_params.get('domain'), request.data.get('plan_id'), DEFAULT_PRICING[request.query_params.get('domain')]['plans'])
+                    credits = order.user.credits.filter(is_active=True).first()
+                    credits.credits_remaining += credit_to_be_added
+                    credits.save()
+                    order.user.save()
+
+                    credit_transaction_obj = CreditTransactionSerializer(data={'user': order.user.id, 'credits_used': credit_to_be_added, 'transaction_type': 'credit', 'scene': None})
+                    if credit_transaction_obj.is_valid():
+                        credit_transaction_obj.save()
+
+                    payment_obj = PaymentSerializer(data={'order': order.id, 'payment_id': request.data.get('razorpay_payment_id'), 'payment_status': 'paid', 'payment_signature': request.data.get('razorpay_signature')})
+                    if payment_obj.is_valid():
+                        payment_obj.save()
+                        return Response({'message': f'{credit_to_be_added} credits added to your account'}, status=status.HTTP_200_OK)
+                    else:
+                        return Response(payment_obj.errors, status=status.HTTP_400_BAD_REQUEST)
+            except Exception as e:
+                print('error in payment', e)
+                return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            return Response({'error': 'Payment verification failed'}, status=status.HTTP_400_BAD_REQUEST)
