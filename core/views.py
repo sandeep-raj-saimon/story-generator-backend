@@ -1003,9 +1003,9 @@ class StoryPreviewView(APIView):
             format = url_name.split('-')[2]
             format = 'image' if format == 'pdf' else 'audio' if format == 'audio' else 'video' if format == 'video' else 'media'
             
-            if story.scenes.count() != story.media.filter(media_type=format, is_active=True).count():
+            if story.scenes.filter(is_active=True).count() != story.media.filter(media_type=format, is_active=True).count():
                 return Response(
-                    {'error': 'generate images for all scenes first'},
+                    {'error': f'generate {format} for all scenes first'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
             # Initialize SQS client
