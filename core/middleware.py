@@ -90,7 +90,7 @@ class CreditDeductionMiddleware:
         if media_type == 'image':
             credits_needed = self.CREDIT_COSTS[media_type] * scene_count
         else:
-            credits_needed = self.CREDIT_COSTS[media_type] * scene.scene_description.count(' ')
+            credits_needed = self.CREDIT_COSTS[media_type] * len(scene.content)
 
         try:
             with transaction.atomic():
