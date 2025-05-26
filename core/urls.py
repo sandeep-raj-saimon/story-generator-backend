@@ -57,7 +57,12 @@ urlpatterns = [
     
     # Generated content endpoint
     path('generated-content/', GeneratedContentListAPIView.as_view(), name='generated-content-list'),
+    path('generated-content/<int:pk>/', GeneratedContentListAPIView.as_view(), name='update-generated-content'),
+
+    # profile related endpoint
     path('profile/', ProfileAPIView.as_view(), name='profile'),
+
+    # payment related endpoint
     path('pricing/config/', PricingConfigView.as_view(), name='get_pricing_config'),
     path('pricing/config/update/', PricingConfigUpdateView.as_view(), name='update_pricing_config'),    
     path('payment/create-order/', CreateOrderView.as_view(), name='create_order'),

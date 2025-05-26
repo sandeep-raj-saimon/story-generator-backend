@@ -1022,13 +1022,19 @@ class StoryPreviewView(APIView):
                 'user_id': request.user.id,
                 'action': 'generate_pdf_preview' if url_name == 'story-preview-pdf' else 'generate_audio_preview' if url_name == 'story-preview-audio' else 'generate_video_preview' if url_name == 'story-preview-video' else 'generate_media'
             }
-            
+            # Mark current revision as inactive
+            Revision.objects.filter(
+                story_id=story_id,
+                format=format if format != 'image' else 'pdf',
+                is_active=True,
+                deleted_at=None
+            ).update(is_active=False)
             # Send message to SQS queue
             response = sqs_client.send_message(
                 QueueUrl=settings.STORY_GENERATION_QUEUE_URL,
                 MessageBody=json.dumps(message)
             )
-            
+            print(f'successfully sent the message to sqs to {format} generation')
             return Response({
                 'message': 'PDF generation request sent successfully',
                 'message_id': response['MessageId']
@@ -1054,7 +1060,9 @@ class PreviewStatusView(APIView):
             revision = Revision.objects.filter(
                 story_id=story_id,
                 story__author=request.user,
-                format=pk
+                format=pk,
+                is_active=True,
+                deleted_at=None
             ).order_by('-created_at').first()
             format = 'mp3' if pk == 'audio' else 'mp4' if pk == 'video' else pk
             if not revision:
@@ -1183,7 +1191,7 @@ class GeneratedContentListAPIView(APIView):
         stories = Story.objects.filter(author=request.user)
         
         # Get all revisions for these stories
-        revisions = Revision.objects.filter(story__in=stories).select_related('story')
+        revisions = Revision.objects.filter(story__in=stories, is_active= True).select_related('story')
         
         # Apply search filter if provided
         if search:
@@ -1221,7 +1229,19 @@ class GeneratedContentListAPIView(APIView):
             'page_size': page_size,
             'total_pages': (total_count + page_size - 1) // page_size
         })
+    def delete(self, request, pk):
+        """Delete generated content."""
+        if not pk:
+            return Response({'error': 'Content ID is required'}, status=status.HTTP_400_BAD_REQUEST)
 
+        try:
+            revision = Revision.objects.get(id=pk, story__author=request.user)
+            revision.deleted_at = datetime.now()
+            revision.is_active = False
+            revision.save()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except Revision.DoesNotExist:
+            return Response({'error': 'Content not found'}, status=status.HTTP_404_NOT_FOUND)
 class ProfileAPIView(APIView):
     """
     API endpoint for getting user profile information.

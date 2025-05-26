@@ -140,7 +140,9 @@ class Revision(models.Model):
     sub_format = models.CharField(max_length=50, null=True, blank=True)
     url = models.URLField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    deleted_at = models.DateField(null=True, blank=True)
     is_current = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=True)
     metadata = models.JSONField(default=dict, null=True, blank=True)
 
     class Meta:
