@@ -1191,7 +1191,7 @@ class GeneratedContentListAPIView(APIView):
         stories = Story.objects.filter(author=request.user)
         
         # Get all revisions for these stories
-        revisions = Revision.objects.filter(story__in=stories, is_active= True).select_related('story')
+        revisions = Revision.objects.filter(story__in=stories, deleted_at__isnull=True).select_related('story').order_by('-created_at')
         
         # Apply search filter if provided
         if search:
