@@ -17,7 +17,7 @@ urlpatterns = [
     path('stories/<int:pk>/', StoryDetailAPIView.as_view(), name='story-detail'),
     path('stories/<int:pk>/generate-bulk-image/', StoryDetailAPIView.as_view(), name='story-generate-bulk-image'),
     path('stories/<int:pk>/generate-bulk-audio/', StoryDetailAPIView.as_view(), name='story-generate-bulk-audio'),
-
+    path('stories/generate/', StoryGenerateAPIView.as_view(), name='dummy-story-generate'),
     path('stories/<int:pk>/segment/', StorySegmentAPIView.as_view(), name='story-segment'),
 
     # Scene endpoints

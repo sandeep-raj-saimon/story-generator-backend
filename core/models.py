@@ -37,6 +37,7 @@ class Story(models.Model):
     is_public = models.BooleanField(_('is public'), default=False)
     word_count = models.IntegerField(_('word count'), default=0)
     is_active = models.BooleanField(_('is active'), default=True)
+    is_default = models.BooleanField(_('is_default'), default=False)
     class Meta:
         verbose_name = _('story')
         verbose_name_plural = _('stories')

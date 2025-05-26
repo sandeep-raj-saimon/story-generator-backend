@@ -39,6 +39,7 @@ import requests
 from datetime import datetime, timedelta
 from django.db import transaction
 from django.db.models import Q
+from django.http import JsonResponse
 
 User = get_user_model()
 
@@ -811,7 +812,34 @@ class UserRegistrationAPIView(APIView):
             
             # Generate tokens
             refresh = RefreshToken.for_user(user)
-            
+            # Create a dummy story by copying story with id=1
+            try:
+                template_story = Story.objects.get(id=1)
+                
+                # Create new story with copied data
+                new_story = Story.objects.create(
+                    title=template_story.title,
+                    content=template_story.content,
+                    author=user,
+                    is_public=template_story.is_public,
+                    word_count=template_story.word_count,
+                    is_default=True
+                )
+
+                # Copy all scenes from template story
+                for scene in template_story.scenes.all():
+                    Scene.objects.create(
+                        story=new_story,
+                        title=scene.title,
+                        content=scene.content,
+                        order=scene.order,
+                        emotion=scene.emotion,
+                        scene_description=scene.scene_description
+                    )
+
+            except Story.DoesNotExist:
+                # If template story doesn't exist, continue without creating dummy story
+                pass
             return Response({
                 'user': UserSerializer(user).data,
                 'refresh': str(refresh),
@@ -1336,3 +1364,55 @@ class PaymentView(APIView):
                 return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
         else:
             return Response({'error': 'Payment verification failed'}, status=status.HTTP_400_BAD_REQUEST)
+
+class StoryGenerateAPIView(APIView):
+    """
+    API endpoint for generating a story.
+    
+    POST /stories/generate/ - Generate a new story
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        """Generate a new story."""
+        try:
+            # Call OpenAI API to generate story
+            client = OpenAI(
+                api_key=settings.CHATGPT_OPENAI_API_KEY
+            )
+            openai_response = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are a creative story writer. Generate an engaging story of exactly 300 words. Your response must be in JSON format with two fields: 'title' and 'content'. The title should be on a single line, and the content should be the story text."},
+                    {"role": "user", "content": "Generate a story in JSON format with 'title' and 'content' fields."}
+                ],
+                max_tokens=500,
+                temperature=0.7,
+                response_format={ "type": "json_object" }
+            )
+
+            # Extract the response text
+            story_text = openai_response.choices[0].message.content
+            
+            try:
+                # Parse the JSON response
+                story_data = json.loads(story_text)
+                # Deduct credits
+                return JsonResponse(story_data)
+                
+            except json.JSONDecodeError:
+                return JsonResponse(
+                    {"error": "Failed to parse story generation response"},
+                    status=500
+                )
+            except ValueError as e:
+                return JsonResponse(
+                    {"error": str(e)},
+                    status=500
+                )
+
+        except Exception as e:
+            return Response(
+                {'error': f'Failed to generate story: {str(e)}'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

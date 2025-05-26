@@ -74,9 +74,9 @@ class StorySerializer(serializers.ModelSerializer):
         model = Story
         fields = (
             'id', 'title', 'content', 'author', 'created_at',
-            'updated_at', 'is_public', 'word_count', 'scenes'
+            'updated_at', 'is_public', 'word_count', 'scenes', 'is_default'
         )
-        read_only_fields = ('id', 'author', 'created_at', 'updated_at', 'word_count')
+        read_only_fields = ('id', 'author', 'created_at', 'updated_at', 'word_count', 'is_default')
 
 class StoryCreateSerializer(serializers.ModelSerializer):
     class Meta:
