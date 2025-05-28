@@ -40,6 +40,11 @@ from datetime import datetime, timedelta
 from django.db import transaction
 from django.db.models import Q
 from django.http import JsonResponse
+from django.core.mail import send_mail
+from django.utils.crypto import get_random_string
+from django.utils import timezone
+import resend
+import traceback
 
 User = get_user_model()
 
@@ -1414,5 +1419,228 @@ class StoryGenerateAPIView(APIView):
         except Exception as e:
             return Response(
                 {'error': f'Failed to generate story: {str(e)}'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+class ForgotPasswordView(APIView):
+    """
+    API endpoint for initiating password reset.
+    
+    POST /auth/forgot-password/ - Send password reset email
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        """Send password reset email."""
+        email = request.data.get('email')
+        if not email:
+            return Response(
+                {'error': 'Email is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            user = User.objects.get(email=email)
+            
+            # Generate a unique token
+            token = get_random_string(length=32)
+            expiry = timezone.now() + timedelta(minutes=30)
+            
+            # Convert expiry to seconds for Redis
+            expiry_seconds = int((expiry - timezone.now()).total_seconds())
+            
+            # Store the token in Redis with expiry
+            redis_client.setex(
+                f'password_reset:{token}',
+                expiry_seconds,  # Use seconds instead of datetime
+                json.dumps({
+                    'user_id': user.id,
+                    'email': user.email
+                })
+            )
+            
+            # Generate reset URL
+            reset_url = f"{settings.FRONTEND_URL}/reset-password?token={token}"
+            resend.api_key = "re_eaD3wimY_NhznCBPAjkVQJ19tDSrewMTv"
+
+            # HTML email template
+            html_content = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Reset Your Password</title>
+                <style>
+                    body {{
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                        line-height: 1.6;
+                        color: #333;
+                        margin: 0;
+                        padding: 0;
+                    }}
+                    .container {{
+                        max-width: 600px;
+                        margin: 0 auto;
+                        padding: 20px;
+                    }}
+                    .header {{
+                        text-align: center;
+                        padding: 20px 0;
+                        background: linear-gradient(to right, #4f46e5, #7c3aed);
+                        border-radius: 8px 8px 0 0;
+                    }}
+                    .header h1 {{
+                        color: white;
+                        margin: 0;
+                        font-size: 24px;
+                    }}
+                    .content {{
+                        background: #ffffff;
+                        padding: 30px;
+                        border-radius: 0 0 8px 8px;
+                        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                    }}
+                    .button {{
+                        display: inline-block;
+                        padding: 12px 24px;
+                        background: linear-gradient(to right, #4f46e5, #7c3aed);
+                        color: white;
+                        text-decoration: none;
+                        border-radius: 6px;
+                        font-weight: 600;
+                        margin: 20px 0;
+                    }}
+                    .footer {{
+                        text-align: center;
+                        margin-top: 20px;
+                        color: #666;
+                        font-size: 14px;
+                    }}
+                    .warning {{
+                        background: #fff3cd;
+                        border: 1px solid #ffeeba;
+                        color: #856404;
+                        padding: 12px;
+                        border-radius: 4px;
+                        margin: 20px 0;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <h1>Reset Your Password</h1>
+                    </div>
+                    <div class="content">
+                        <p>Hello,</p>
+                        <p>We received a request to reset your password for your WhisprTales account. Click the button below to reset your password:</p>
+                        
+                        <div style="text-align: center;">
+                            <a href="{reset_url}" class="button">Reset Password</a>
+                        </div>
+                        
+                        <p>If the button doesn't work, you can also copy and paste this link into your browser:</p>
+                        <p style="word-break: break-all; color: #4f46e5;">{reset_url}</p>
+                        
+                        <div class="warning">
+                            <strong>Note:</strong> This link will expire in 30 minutes for security reasons.
+                        </div>
+                        
+                        <p>If you didn't request a password reset, you can safely ignore this email. Your password will remain unchanged.</p>
+                        
+                        <p>Best regards,<br>The WhisprTales Team</p>
+                    </div>
+                    <div class="footer">
+                        <p>This is an automated message, please do not reply to this email.</p>
+                        <p>&copy; {timezone.now().year} WhisprTales. All rights reserved.</p>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """
+
+            # Send email using Resend
+            r = resend.Emails.send({
+                "from": "WhisprTales <support@whisprtales.com>",
+                "to": email,
+                "subject": "Reset Your WhisprTales Password",
+                "html": html_content
+            })
+            
+            print('email sent for forgot password', r)
+            return Response({
+                'message': 'Password reset email sent successfully'
+            })
+            
+        except User.DoesNotExist:
+            # Log the non-existent user attempt
+            print(f'Password reset attempt for non-existent user: {email}')
+            return Response(
+                {'message': 'If an account exists with this email, you will receive a password reset link'},
+                status=status.HTTP_200_OK
+            )
+        except Exception as e:
+            # Properly log the exception with traceback
+            error_traceback = traceback.format_exc()
+            print(f'Exception in forgot password API for email {email}:')
+            print(f'Error: {str(e)}')
+            print('Traceback:')
+            print(error_traceback)
+            return Response(
+                {'error': 'An unexpected error occurred. Please try again later.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+class ResetPasswordView(APIView):
+    """
+    API endpoint for resetting password.
+    
+    POST /auth/reset-password/ - Reset password using token
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        """Reset password using token."""
+        token = request.data.get('token')
+        new_password = request.data.get('password')
+        
+        if not token or not new_password:
+            return Response(
+                {'error': 'Token and new password are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Get token data from Redis
+        token_data = redis_client.get(f'password_reset:{token}')
+        if not token_data:
+            return Response(
+                {'error': 'Invalid or expired token'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            token_data = json.loads(token_data)
+            user = User.objects.get(id=token_data['user_id'])
+            
+            # Update password
+            user.set_password(new_password)
+            user.save()
+            
+            # Delete the used token
+            redis_client.delete(f'password_reset:{token}')
+            
+            return Response({
+                'message': 'Password reset successful'
+            })
+            
+        except User.DoesNotExist:
+            return Response(
+                {'error': 'User not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )

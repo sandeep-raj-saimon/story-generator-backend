@@ -38,6 +38,10 @@ urlpatterns = [
     # Authentication endpoints
     path('auth/register/', UserRegistrationAPIView.as_view(), name='user-register'),
     path('auth/login/', UserLoginAPIView.as_view(), name='user-login'),
+
+    # Forgot password endpoints
+    path('auth/forgot-password/', ForgotPasswordView.as_view(), name='forgot-passsword'),
+    path('auth/reset-password/', ResetPasswordView.as_view(), name='reset-passsword'),
     # path('auth/google/', GoogleLogin.as_view(), name='google-login'),
     path('auth/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
