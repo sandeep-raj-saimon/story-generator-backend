@@ -1,5 +1,5 @@
 """
-Views for the Story Generator API.
+Views for the WhisprTales API.
 
 This module contains APIViews that handle API requests for users, stories, scenes, and media.
 Each view class provides specific endpoints for its respective model.

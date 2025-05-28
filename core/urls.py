@@ -1,5 +1,5 @@
 """
-URL Configuration for the Story Generator API.
+URL Configuration for the WhisprTales API.
 
 This module defines the URL patterns for the API endpoints.
 """

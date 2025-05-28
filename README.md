@@ -1,6 +1,6 @@
-# Story Generator Backend
+# WhisprTales Backend
 
-A Django REST API backend for the Story Generator application.
+A Django REST API backend for the WhisprTales application.
 
 ## Setup
 
