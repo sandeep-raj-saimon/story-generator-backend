@@ -24,7 +24,7 @@ import uuid
 # from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
 # from allauth.socialaccount.providers.oauth2.client import OAuth2Client
 # from dj_rest_auth.registration.views import SocialLoginView
-from .models import Story, Scene, Media, Revision
+from .models import Story, Scene, Media, Revision, CreditTransaction
 from .serializers import *
 from django.contrib.auth import get_user_model
 import json
@@ -56,6 +56,7 @@ redis_client = redis.Redis(
 )
 
 DISCOUNT_PERCENTAGE = 10
+REFERRAL_FREE_CREDITS = 300
 # Default pricing configurations
 DEFAULT_PRICING = {
     'com': {
@@ -86,7 +87,7 @@ DEFAULT_PRICING = {
             {
                 'id': 2,
                 'name': 'Standard',
-                'price': 4.99,
+                'price': 1,
                 'credits': 1000,
                 'features': [
                     '1000 credits',
@@ -134,7 +135,7 @@ DEFAULT_PRICING = {
             {
                 'id': 2,
                 'name': 'Standard',
-                'price': 99,
+                'price': 4.99,
                 'credits': 1000,
                 'features': [
                     '1000 credits',
@@ -818,13 +819,15 @@ class UserRegistrationAPIView(APIView):
             # Check if code already exists
             if not User.objects.filter(referral_code=code).exists():
                 return code
+
     permission_classes = [permissions.AllowAny]
     def post(self, request):
         """Register a new user."""
+        # Generate referral code before validation
+        request.data['referral_code'] = self.generate_referral_code()
         serializer = UserRegistrationSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
-            user.referral_code = self.generate_referral_code
             # Generate tokens
             refresh = RefreshToken.for_user(user)
             # Create a dummy story by copying story with id=1
@@ -1296,7 +1299,7 @@ class CreateOrderView(APIView):
         plan_id = request.query_params.get('plan_id')
 
         referral_code = request.data.get('referral_code')
-        referring_user = True
+        referring_user = None
         if referral_code:
             referring_user = User.objects.filter(referral_code=referral_code).first()
 
@@ -1320,7 +1323,7 @@ class CreateOrderView(APIView):
         else:
             currency = 'USD'
         plans = DEFAULT_PRICING[domain]['plans']
-        print(plans, plan_id, domain)
+
         plan = next((p for p in plans if p['id'] == int(plan_id)), None)
         if not plan:
             return Response({'error': 'Invalid plan'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1328,65 +1331,422 @@ class CreateOrderView(APIView):
         amount = round(plan['price'] * (1 - (DISCOUNT_PERCENTAGE) / 100), 2) if referring_user else plan['price']
         receipt = redis_client.incr('prod_razorpay_last_order_id') if redis_client.get('is_razorpay_test') else redis_client.incr('prod_razorpay_last_order_id')
 
-        client = razorpay.Client(auth=(settings.TEST_RAZORPAY_KEY_ID, settings.TEST_RAZORPAY_KEY_SECRET)) if redis_client.get('is_razorpay_test') else razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
+        client = razorpay.Client(auth=(settings.TEST_RAZORPAY_KEY_ID, settings.TEST_RAZORPAY_KEY_SECRET)) if redis_client.get('is_razorpay_test') else razorpay.Client(auth=(settings.PROD_RAZORPAY_KEY_ID, settings.PROD_RAZORPAY_KEY_SECRET))
         order_params = {
             'amount': amount*100,
             'currency': currency,
             'receipt': f'order_rcptid_{receipt}',
-            'notes': []
+            'notes': {
+                'referral_code': referral_code
+            }
         }
-        print(order_params)
         order = client.order.create(order_params)
-        order_obj = OrderSerializer(data={'user': request.user.id, 'amount': amount, 'status': 'pending', 'order_id': order['id']})
+        metadata = {
+            'referral_code': referral_code
+        }
+        order_obj = OrderSerializer(data={
+            'user': request.user.id,
+            'amount': amount,
+            'status': 'pending',
+            'order_id': order['id'],
+            'metadata': metadata
+        })
         if order_obj.is_valid():
             order_obj.save()
             return Response(order_obj.data, status=status.HTTP_201_CREATED)
         else:
             return Response(order_obj.errors, status=status.HTTP_400_BAD_REQUEST)
     
+def send_payment_success_email(user, order, credit_to_be_added, credits_remaining, domain, referee=None):
+    """Send payment success email to user."""
+    try:
+        resend.api_key = settings.RESEND_KEY
+        
+        # HTML email template for payment success
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Payment Successful - WhisprTales</title>
+            <style>
+                body {{
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                    line-height: 1.6;
+                    color: #333;
+                    margin: 0;
+                    padding: 0;
+                }}
+                .container {{
+                    max-width: 600px;
+                    margin: 0 auto;
+                    padding: 20px;
+                }}
+                .header {{
+                    text-align: center;
+                    padding: 20px 0;
+                    background: linear-gradient(to right, #4f46e5, #7c3aed);
+                    border-radius: 8px 8px 0 0;
+                }}
+                .header h1 {{
+                    color: white;
+                    margin: 0;
+                    font-size: 24px;
+                }}
+                .content {{
+                    background: #ffffff;
+                    padding: 30px;
+                    border-radius: 0 0 8px 8px;
+                    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                }}
+                .success-icon {{
+                    text-align: center;
+                    margin: 20px 0;
+                }}
+                .success-icon svg {{
+                    width: 64px;
+                    height: 64px;
+                    color: #10B981;
+                }}
+                .details {{
+                    background: #f8fafc;
+                    border-radius: 6px;
+                    padding: 20px;
+                    margin: 20px 0;
+                }}
+                .details p {{
+                    margin: 10px 0;
+                }}
+                .footer {{
+                    text-align: center;
+                    margin-top: 20px;
+                    color: #666;
+                    font-size: 14px;
+                }}
+                .button {{
+                    display: inline-block;
+                    padding: 12px 24px;
+                    background: linear-gradient(to right, #4f46e5, #7c3aed);
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 6px;
+                    font-weight: 600;
+                    margin-top: 20px;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>Payment Successful!</h1>
+                </div>
+                <div class="content">
+                    <div class="success-icon">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                        </svg>
+                    </div>
+                    
+                    <p>Hello {user.username},</p>
+                    
+                    <p>Thank you for your purchase! Your payment has been successfully processed and your credits have been added to your account.</p>
+                    
+                    <div class="details">
+                        <p><strong>Order Details:</strong></p>
+                        <p>Order ID: {order.order_id}</p>
+                        <p>Amount Paid: {order.amount} {DEFAULT_PRICING[domain]['currency']}</p>
+                        <p>Credits Added: {credit_to_be_added}</p>
+                        <p>New Credit Balance: {credits_remaining}</p>
+                    </div>
+                    
+                    <p>You can now use these credits to create amazing stories with WhisprTales. Start your creative journey today!</p>
+                    
+                    <div style="text-align: center;">
+                        <a href="{settings.FRONTEND_URL}" class="button">Start Creating</a>
+                    </div>
+                    
+                    <p>If you have any questions or need assistance, please don't hesitate to contact our support team.</p>
+                    
+                    <p>Best regards,<br>The WhisprTales Team</p>
+                </div>
+                <div class="footer">
+                    <p>This is an automated message, please do not reply to this email.</p>
+                    <p>&copy; {timezone.now().year} WhisprTales. All rights reserved.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+
+        # Send email using Resend
+        r = resend.Emails.send({
+            "from": "WhisprTales <support@whisprtales.com>",
+            "to": user.email,
+            "subject": "Payment Successful - Credits Added to Your Account",
+            "html": html_content
+        })
+        
+        print('Payment success email sent:', r)
+        return True
+    except Exception as e:
+        print('Error sending payment success email:', str(e))
+        return False
+
+def send_referral_success_email(referee, referred_user):
+    """Send email to referee when their referral code is used."""
+    try:
+        resend.api_key = settings.RESEND_KEY
+        
+        # HTML email template for referral success
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Referral Success - WhisprTales</title>
+            <style>
+                body {{
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                    line-height: 1.6;
+                    color: #333;
+                    margin: 0;
+                    padding: 0;
+                }}
+                .container {{
+                    max-width: 600px;
+                    margin: 0 auto;
+                    padding: 20px;
+                }}
+                .header {{
+                    text-align: center;
+                    padding: 20px 0;
+                    background: linear-gradient(to right, #4f46e5, #7c3aed);
+                    border-radius: 8px 8px 0 0;
+                }}
+                .header h1 {{
+                    color: white;
+                    margin: 0;
+                    font-size: 24px;
+                }}
+                .content {{
+                    background: #ffffff;
+                    padding: 30px;
+                    border-radius: 0 0 8px 8px;
+                    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                }}
+                .success-icon {{
+                    text-align: center;
+                    margin: 20px 0;
+                }}
+                .success-icon svg {{
+                    width: 64px;
+                    height: 64px;
+                    color: #10B981;
+                }}
+                .bonus-section {{
+                    background: #f0fdf4;
+                    border: 1px solid #bbf7d0;
+                    color: #166534;
+                    padding: 20px;
+                    border-radius: 6px;
+                    margin: 20px 0;
+                }}
+                .details {{
+                    background: #f8fafc;
+                    border-radius: 6px;
+                    padding: 20px;
+                    margin: 20px 0;
+                }}
+                .button {{
+                    display: inline-block;
+                    padding: 12px 24px;
+                    background: linear-gradient(to right, #4f46e5, #7c3aed);
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 6px;
+                    font-weight: 600;
+                    margin-top: 20px;
+                }}
+                .footer {{
+                    text-align: center;
+                    margin-top: 20px;
+                    color: #666;
+                    font-size: 14px;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>Referral Success!</h1>
+                </div>
+                <div class="content">
+                    <div class="success-icon">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                        </svg>
+                    </div>
+                    
+                    <p>Hello {referee.username},</p>
+                    
+                    <p>Great news! Your referral code was just used by {referred_user.username} to sign up for WhisprTales.</p>
+                    
+                    <div class="bonus-section">
+                        <p><strong>🎉 You've Earned {REFERRAL_FREE_CREDITS} Free Credits!</strong></p>
+                        <p>As a thank you for referring {referred_user.username}, we've added {REFERRAL_FREE_CREDITS} free credits to your account.</p>
+                    </div>
+                    
+                    <div class="details">
+                        <p><strong>Your Referral Code:</strong> {referee.referral_code}</p>
+                        <p>Share this code with your friends and family to earn more free credits!</p>
+                    </div>
+                    
+                    <p>Keep the referrals coming! For every friend who signs up using your referral code, you'll receive {REFERRAL_FREE_CREDITS} free credits.</p>
+                    
+                    <div style="text-align: center;">
+                        <a href="{settings.FRONTEND_URL}/share" class="button">Share Your Referral Code</a>
+                    </div>
+                    
+                    <p>Thank you for helping us grow the WhisprTales community!</p>
+                    
+                    <p>Best regards,<br>The WhisprTales Team</p>
+                </div>
+                <div class="footer">
+                    <p>This is an automated message, please do not reply to this email.</p>
+                    <p>&copy; {timezone.now().year} WhisprTales. All rights reserved.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+
+        # Send email using Resend
+        r = resend.Emails.send({
+            "from": "WhisprTales <support@whisprtales.com>",
+            "to": referee.email,
+            "subject": "Referral Success - You've Earned Free Credits!",
+            "html": html_content
+        })
+        
+        print('Referral success email sent to referee:', r)
+        return True
+    except Exception as e:
+        print('Error sending referral success email:', str(e))
+        return False
+
 class PaymentView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
         """Create a payment."""
-        client = razorpay.Client(auth=(settings.TEST_RAZORPAY_KEY_ID, settings.TEST_RAZORPAY_KEY_SECRET))
+        client = razorpay.Client(auth=(settings.TEST_RAZORPAY_KEY_ID, settings.TEST_RAZORPAY_KEY_SECRET)) if redis_client.get('is_razorpay_test') else razorpay.Client(auth=(settings.PROD_RAZORPAY_KEY_ID, settings.PROD_RAZORPAY_KEY_SECRET))
         request.body = request.data
 
-        is_verified= client.utility.verify_payment_signature({
-        'razorpay_order_id': request.data.get('order_id'),
-        'razorpay_payment_id': request.data.get('razorpay_payment_id'),
-        'razorpay_signature': request.data.get('razorpay_signature')
+        is_verified = client.utility.verify_payment_signature({
+            'razorpay_order_id': request.data.get('order_id'),
+            'razorpay_payment_id': request.data.get('razorpay_payment_id'),
+            'razorpay_signature': request.data.get('razorpay_signature')
         })
 
         if is_verified:
             try:
+                # Store data needed for email outside transaction
+                email_data = None
+                referee = None
+                
+                # Database operations in transaction
                 with transaction.atomic():
                     order = Order.objects.get(order_id=request.data.get('order_id'))
                     order.status = 'paid'
                     order.save()
 
+                    # Get referral code from order metadata
+                    order_metadata = order.metadata
+                    referral_code = order_metadata.get('referral_code') if order_metadata else None
+                    
+                    # If there's a valid referral code, update the user's referred_by field
+                    if referral_code:
+                        referee = User.objects.filter(referral_code=referral_code).first()
+                        if referee and referee != order.user:
+                            # Update referred_by relationship
+                            order.user.referred_by = referee
+                            order.user.save()
+                            
+                            # Add referral bonus credits to the referee (person whose code was used)
+                            referee_credits = referee.credits.filter(is_active=True).first()
+                            if referee_credits:
+                                referee_credits.credits_remaining += REFERRAL_FREE_CREDITS
+                                referee_credits.save()
+                                
+                                # Create credit transaction record for the referee
+                                credit_transaction = CreditTransaction.objects.create(
+                                    user=referee,  # Changed from order.user to referee
+                                    credits_used=REFERRAL_FREE_CREDITS,
+                                    transaction_type='credit'
+                                )
+
+                    # Add purchased credits to the user who made the payment
                     credit_to_be_added = next(p for p in DEFAULT_PRICING[request.query_params.get('domain')]['plans'] if p['id'] == int(request.data.get('plan_id')))['credits']
-                    print('credit_to_be_added', credit_to_be_added, request.query_params.get('domain'), request.data.get('plan_id'), DEFAULT_PRICING[request.query_params.get('domain')]['plans'])
                     credits = order.user.credits.filter(is_active=True).first()
                     credits.credits_remaining += credit_to_be_added
                     credits.save()
                     order.user.save()
 
-                    credit_transaction_obj = CreditTransactionSerializer(data={'user': order.user.id, 'credits_used': credit_to_be_added, 'transaction_type': 'credit', 'scene': None})
+                    # Create credit transaction for the purchased credits
+                    credit_transaction_obj = CreditTransactionSerializer(data={
+                        'user': order.user.id,
+                        'credits_used': credit_to_be_added,
+                        'transaction_type': 'credit',
+                        'scene': None
+                    })
                     if credit_transaction_obj.is_valid():
                         credit_transaction_obj.save()
 
-                    payment_obj = PaymentSerializer(data={'order': order.id, 'payment_id': request.data.get('razorpay_payment_id'), 'payment_status': 'paid', 'payment_signature': request.data.get('razorpay_signature')})
+                    payment_obj = PaymentSerializer(data={
+                        'order': order.id,
+                        'payment_id': request.data.get('razorpay_payment_id'),
+                        'payment_status': 'paid',
+                        'payment_signature': request.data.get('razorpay_signature')
+                    })
                     if payment_obj.is_valid():
                         payment_obj.save()
-                        return Response({'message': f'{credit_to_be_added} credits added to your account'}, status=status.HTTP_200_OK)
+                        # Store data needed for email
+                        email_data = {
+                            'user': order.user,
+                            'order': order,
+                            'credit_to_be_added': credit_to_be_added,
+                            'credits_remaining': credits.credits_remaining,
+                            'domain': request.query_params.get('domain'),
+                            'referee': referee
+                        }
                     else:
                         return Response(payment_obj.errors, status=status.HTTP_400_BAD_REQUEST)
+
+                # Send emails outside of transaction
+                if email_data:
+                    # Send payment success email to the user who made the payment
+                    send_payment_success_email(
+                        email_data['user'],
+                        email_data['order'],
+                        email_data['credit_to_be_added'],
+                        email_data['credits_remaining'],
+                        email_data['domain'],
+                        email_data['referee']
+                    )
+                    
+                    # Send referral success email to the referee (person whose code was used)
+                    if email_data['referee']:
+                        send_referral_success_email(email_data['referee'], email_data['user'])
+
+                return Response({'message': f'{credit_to_be_added} credits added to your account'}, status=status.HTTP_200_OK)
+                
             except Exception as e:
-                print('error in payment', e)
+                print('error in payment:', e)
                 return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
         else:
-            return Response({'error': 'Payment verification failed'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'Invalid payment signature'}, status=status.HTTP_400_BAD_REQUEST)
 
 class StoryGenerateAPIView(APIView):
     """
@@ -1691,11 +2051,11 @@ class ValidateReferralView(APIView):
             # Check if referral code exists in User model
             referring_user = User.objects.filter(referral_code=referral_code).first()
 
-            # if not referring_user:
-            #     return Response(
-            #         {'error': 'Invalid referral code'},
-            #         status=status.HTTP_400_BAD_REQUEST
-            #     )
+            if not referring_user:
+                return Response(
+                    {'error': 'Invalid referral code'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
             # Check if code is not user's own referral code
             if referring_user == request.user:

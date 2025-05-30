@@ -18,7 +18,7 @@ class User(AbstractUser):
     )
     referral_code = models.CharField(
         _('referral code'),
-        max_length=10,
+        max_length=50,
         blank=True,
         null=True,
         help_text='Unique referral code for this user'
@@ -249,7 +249,7 @@ class Order(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     order_id = models.CharField(max_length=200)
-
+    metadata = models.JSONField(null=True, blank=True)
     def __str__(self):
         return f"{self.user.username} - {self.plan.name} - {self.amount}"
     

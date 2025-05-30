@@ -14,7 +14,7 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ('id', 'username', 'email', 'bio', 'profile_picture', 'credits')
+        fields = ('id', 'username', 'email', 'bio', 'profile_picture', 'credits', 'referral_code')
         read_only_fields = ('id',)
 
     def get_credits(self, obj):
@@ -29,13 +29,14 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ('username', 'email', 'password')
+        fields = ('username', 'email', 'password', 'referral_code')
 
     def create(self, validated_data):
         user = User.objects.create_user(
             username=validated_data['username'],
             email=validated_data['email'],
-            password=validated_data['password']
+            password=validated_data['password'],
+            referral_code=validated_data.get('referral_code')  # Add referral code during user creation
         )
         # Create initial credits for the user
         Credits.objects.create(
@@ -105,7 +106,7 @@ class RevisionSerializer(serializers.ModelSerializer):
 class OrderSerializer(serializers.ModelSerializer):
     class Meta:
         model = Order
-        fields = ['id', 'user', 'amount', 'status', 'created_at', 'updated_at', 'order_id']
+        fields = ['id', 'user', 'amount', 'status', 'created_at', 'updated_at', 'order_id', 'metadata']
         read_only_fields = ['id', 'created_at', 'updated_at']
 
 class PaymentSerializer(serializers.ModelSerializer):
