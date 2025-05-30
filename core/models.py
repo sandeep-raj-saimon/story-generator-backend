@@ -3,6 +3,7 @@ from django.contrib.auth.models import AbstractUser
 from django.utils.translation import gettext_lazy as _
 from django.conf import settings
 from django.utils import timezone
+import uuid
 
 class User(AbstractUser):
     """Custom user model with additional fields"""
@@ -15,12 +16,33 @@ class User(AbstractUser):
         null=True,
         help_text='S3 URL for the profile picture'
     )
+    referral_code = models.CharField(
+        _('referral code'),
+        max_length=10,
+        blank=True,
+        null=True,
+        help_text='Unique referral code for this user'
+    )
+    referred_by = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='referrals',
+        help_text='User who referred this user'
+    )
     
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = ['username']
 
     def __str__(self):
         return self.email
+
+    # def save(self, *args, **kwargs):
+    #     # Generate referral code if not set
+    #     if not self.referral_code:
+    #         self.referral_code = str(uuid.uuid4())[:8].upper()
+    #     super().save(*args, **kwargs)
 
 class Story(models.Model):
     """Story model to store user's stories"""

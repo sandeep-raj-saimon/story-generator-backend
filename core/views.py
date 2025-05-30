@@ -55,6 +55,7 @@ redis_client = redis.Redis(
     password=os.getenv('REDISPASSWORD')
 )
 
+DISCOUNT_PERCENTAGE = 10
 # Default pricing configurations
 DEFAULT_PRICING = {
     'com': {
@@ -808,13 +809,22 @@ class UserRegistrationAPIView(APIView):
     
     POST /auth/register/ - Register a new user
     """
+    def generate_referral_code(self):
+        """Generate a unique referral code."""
+        while True:
+            # Generate a random 8-character code
+            code = str(uuid.uuid4())[:8].upper()
+            
+            # Check if code already exists
+            if not User.objects.filter(referral_code=code).exists():
+                return code
     permission_classes = [permissions.AllowAny]
     def post(self, request):
         """Register a new user."""
         serializer = UserRegistrationSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
-            
+            user.referral_code = self.generate_referral_code
             # Generate tokens
             refresh = RefreshToken.for_user(user)
             # Create a dummy story by copying story with id=1
@@ -822,7 +832,7 @@ class UserRegistrationAPIView(APIView):
                 template_story = Story.objects.get(id=1)
                 
                 # Create new story with copied data
-                new_story = Story.objects.create(
+                Story.objects.create(
                     title=template_story.title,
                     content=template_story.content,
                     author=user,
@@ -830,17 +840,6 @@ class UserRegistrationAPIView(APIView):
                     word_count=template_story.word_count,
                     is_default=True
                 )
-
-                # Copy all scenes from template story
-                for scene in template_story.scenes.all():
-                    Scene.objects.create(
-                        story=new_story,
-                        title=scene.title,
-                        content=scene.content,
-                        order=scene.order,
-                        emotion=scene.emotion,
-                        scene_description=scene.scene_description
-                    )
 
             except Story.DoesNotExist:
                 # If template story doesn't exist, continue without creating dummy story
@@ -1293,7 +1292,26 @@ class CreateOrderView(APIView):
 
     def post(self, request):
         """Create an order."""
+        print("create order", request.data)
         plan_id = request.query_params.get('plan_id')
+
+        referral_code = request.data.get('referral_code')
+        referring_user = True
+        if referral_code:
+            referring_user = User.objects.filter(referral_code=referral_code).first()
+
+            if not referring_user:
+                return Response(
+                    {'error': 'Invalid referral code'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Check if code is not user's own referral code
+            if referring_user == request.user:
+                return Response(
+                    {'error': 'Cannot use your own referral code'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
         if plan_id is None or plan_id == '' or plan_id == '1':
             return Response({'error': 'Invalid plan'}, status=status.HTTP_400_BAD_REQUEST)
         domain = request.query_params.get('domain')
@@ -1306,9 +1324,9 @@ class CreateOrderView(APIView):
         plan = next((p for p in plans if p['id'] == int(plan_id)), None)
         if not plan:
             return Response({'error': 'Invalid plan'}, status=status.HTTP_400_BAD_REQUEST)
-        amount = plan['price']
+        
+        amount = round(plan['price'] * (1 - (DISCOUNT_PERCENTAGE) / 100), 2) if referring_user else plan['price']
         receipt = redis_client.incr('prod_razorpay_last_order_id') if redis_client.get('is_razorpay_test') else redis_client.incr('prod_razorpay_last_order_id')
-        print(amount, currency, receipt)
 
         client = razorpay.Client(auth=(settings.TEST_RAZORPAY_KEY_ID, settings.TEST_RAZORPAY_KEY_SECRET)) if redis_client.get('is_razorpay_test') else razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
         order_params = {
@@ -1644,3 +1662,56 @@ class ResetPasswordView(APIView):
                 {'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class ValidateReferralView(APIView):
+    """
+    API endpoint for validating referral codes.
+    
+    POST /auth/validate-referral/ - Validate a referral code
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        """Validate referral code."""
+        referral_code = request.data.get('referral_code')
+
+        if not referral_code:
+            return Response(
+                {'error': 'Referral code is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            if request.user.referred_by:
+                return Response(
+                    {'error': 'You have alreay applied referral code.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            # Check if referral code exists in User model
+            referring_user = User.objects.filter(referral_code=referral_code).first()
+
+            # if not referring_user:
+            #     return Response(
+            #         {'error': 'Invalid referral code'},
+            #         status=status.HTTP_400_BAD_REQUEST
+            #     )
+
+            # Check if code is not user's own referral code
+            if referring_user == request.user:
+                return Response(
+                    {'error': 'Cannot use your own referral code'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            return Response({
+                'message': 'Valid referral code',
+                'discountPercentage': DISCOUNT_PERCENTAGE  # 10% discount
+            })
+
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+

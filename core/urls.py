@@ -46,6 +46,8 @@ urlpatterns = [
     path('auth/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
 
+    # Verify referral code
+    path('auth/validate-referral/', ValidateReferralView.as_view(), name='validate-referral-code'),
     # Preview endpoints
     path('stories/<int:story_id>/preview-pdf/', StoryPreviewView.as_view(), name='story-preview-pdf'),
     path('stories/<int:story_id>/preview-audio/', StoryPreviewView.as_view(), name='story-preview-audio'),
