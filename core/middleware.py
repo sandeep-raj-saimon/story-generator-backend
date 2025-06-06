@@ -7,8 +7,19 @@ from django.contrib.auth import get_user_model
 from django.conf import settings
 from jwt import decode as jwt_decode
 from jwt.exceptions import InvalidTokenError
+from .utils import *
+import math
+import redis
+import os
+from rest_framework.renderers import JSONRenderer
 
 User = get_user_model()
+
+redis_client = redis.Redis(
+    host=os.getenv('REDISHOST'),
+    port=os.getenv('REDISPORT'),
+    password=os.getenv('REDISPASSWORD')
+)
 
 class CreditDeductionMiddleware:
     """
@@ -16,11 +27,6 @@ class CreditDeductionMiddleware:
     Deducts credits based on the media type and number of scenes.
     """
     
-    # Credit costs for different media types
-    CREDIT_COSTS = {
-        'image': 100,  # 1 credit per image
-        'audio': 0.3,  # 2 credits per audio
-    }
     
     def __init__(self, get_response):
         self.get_response = get_response
@@ -34,14 +40,40 @@ class CreditDeductionMiddleware:
         path = request.path_info
         if not any(endpoint in path for endpoint in ['generate-image', 'generate-audio', 'generate-bulk-image', 'generate-bulk-audio']):
             return self.get_response(request)
+        # Get the media type and scene ID for locking
+        media_type = 'image' if 'image' in path else 'audio'
+        scene_id = request.path.split('/')[-3]
+        
+        # Create Redis lock key
+        lock_key = f"scene_{scene_id}_{media_type}_lock"
+        # Check if lock exists
+        if redis_client.exists(lock_key):
+            
+            response = Response(
+                {'error': 'A media generation request is already in progress for this scene. Please try again later.', 'error_code': 'E001' },
+                status=status.HTTP_403_FORBIDDEN
+            )
+            response.accepted_renderer = JSONRenderer()
+            response.accepted_media_type = "application/json"
+            response.renderer_context = {}
+            response.render()
+            return response
 
+            
+        # Set lock with 5 minute expiry
+        redis_client.setex(lock_key, 300, 'locked')
         # Get the JWT token from the Authorization header
         auth_header = request.META.get('HTTP_AUTHORIZATION', '')
         if not auth_header.startswith('Bearer '):
-            return Response(
+            response = Response(
                 {'error': 'Invalid authorization header'},
                 status=status.HTTP_401_UNAUTHORIZED
             )
+            response.accepted_renderer = JSONRenderer()
+            response.accepted_media_type = "application/json"
+            response.renderer_context = {}
+            response.render()
+            return response
 
         try:
             # Extract and decode the JWT token
@@ -60,16 +92,26 @@ class CreditDeductionMiddleware:
                 user = User.objects.get(id=user_id)
                 request.user = user
             except User.DoesNotExist:
-                return Response(
-                    {'error': 'User not found'},
+                response = Response(
+                    {'error': 'User not found', 'error_code': 'E002'},
                     status=status.HTTP_401_UNAUTHORIZED
                 )
+                response.accepted_renderer = JSONRenderer()
+                response.accepted_media_type = "application/json"
+                response.renderer_context = {}
+                response.render()
+                return response
 
         except InvalidTokenError:
-            return Response(
-                {'error': 'Invalid token'},
+            response = Response(
+                {'error': 'Invalid token', 'error_code': 'E003'},
                 status=status.HTTP_401_UNAUTHORIZED
             )
+            response.accepted_renderer = JSONRenderer()
+            response.accepted_media_type = "application/json"
+            response.renderer_context = {}
+            response.render()
+            return response
 
         # Get the media type from the URL
         media_type = 'image' if 'image' in path else 'audio'
@@ -81,17 +123,18 @@ class CreditDeductionMiddleware:
         scene = Scene.objects.get(id=int(scene_id))
         if scene.story.author != request.user:
             return Response(
-                {'error': 'You are not authorized to generate media for this scene'},
+                {'error': 'You are not authorized to generate media for this scene', 'error_code': 'E004' },
                 status=status.HTTP_403_FORBIDDEN
             )
 
         # Calculate total credits needed
         credits_needed = 0
         if media_type == 'image':
-            credits_needed = self.CREDIT_COSTS[media_type] * scene_count
+            # credits_needed = self.CREDIT_COSTS[media_type] * scene_count
+            credits_needed = math.ceil(CREDIT_COSTS[media_type] * scene_count)
         else:
-            credits_needed = self.CREDIT_COSTS[media_type] * len(scene.content)
-
+            # credits_needed = self.CREDIT_COSTS[media_type] * len(scene.content)
+            credits_needed = math.ceil(CREDIT_COSTS[media_type] * len(scene.content))
         try:
             with transaction.atomic():
                 # Get user's active credits
@@ -114,7 +157,8 @@ class CreditDeductionMiddleware:
                     return Response(
                         {
                             'error': f'Insufficient credits. You need {credits_needed} credits for this operation.',
-                            'credits_remaining': credits.credits_remaining
+                            'credits_remaining': credits.credits_remaining,
+                            'error_code': 'E005'
                         },
                         status=status.HTTP_402_PAYMENT_REQUIRED
                     )
@@ -142,6 +186,6 @@ class CreditDeductionMiddleware:
         except Exception as e:
             print('Error processing credits', e)
             return Response(
-                {'error': f'Error processing credits: {str(e)}'},
+                {'error': f'Error processing credits: {str(e)}', 'error_code': 'E006'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )

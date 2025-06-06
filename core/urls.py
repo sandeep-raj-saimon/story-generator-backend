@@ -73,4 +73,15 @@ urlpatterns = [
     path('pricing/config/update/', PricingConfigUpdateView.as_view(), name='update_pricing_config'),    
     path('payment/create-order/', CreateOrderView.as_view(), name='create_order'),
     path('payment/verify/', PaymentView.as_view(), name='verify_payment'),
+
+    # Job endpoints
+    path('jobs/', JobViewSet.as_view({'get': 'list', 'post': 'create'}), name='job-list-create'),
+    path('jobs/<uuid:pk>/', JobViewSet.as_view({
+        'get': 'retrieve',
+        'put': 'update',
+        'patch': 'partial_update',
+        'delete': 'destroy'
+    }), name='job-detail'),
+    path('jobs/<uuid:pk>/retry/', JobViewSet.as_view({'post': 'retry'}), name='job-retry'),
+    path('jobs/<uuid:pk>/cancel/', JobViewSet.as_view({'post': 'cancel'}), name='job-cancel'),
 ]

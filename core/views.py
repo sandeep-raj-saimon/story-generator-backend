@@ -21,10 +21,11 @@ import os
 import json
 import razorpay
 import uuid
+import math
 # from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
 # from allauth.socialaccount.providers.oauth2.client import OAuth2Client
 # from dj_rest_auth.registration.views import SocialLoginView
-from .models import Story, Scene, Media, Revision, CreditTransaction
+from .models import Story, Scene, Media, Revision, CreditTransaction, Job
 from .serializers import *
 from django.contrib.auth import get_user_model
 import json
@@ -45,6 +46,8 @@ from django.utils.crypto import get_random_string
 from django.utils import timezone
 import resend
 import traceback
+from .utils import *
+from .utils import send_job_to_sqs
 
 User = get_user_model()
 
@@ -312,7 +315,7 @@ class StoryDetailAPIView(APIView):
                     print(f"Message for media generation: {message}")
                     # Send message to SQS queue
                     response = sqs_client.send_message(
-                        QueueUrl=settings.STORY_GENERATION_QUEUE_URL,
+                        QueueUrl=settings.WHISPR_TALES_QUEUE_URL,
                         MessageBody=json.dumps(message)
                     )
             elif media_type == 'audio':
@@ -325,7 +328,7 @@ class StoryDetailAPIView(APIView):
                     'action': 'generate_entire_audio'
                 }
                 response = sqs_client.send_message(
-                    QueueUrl=settings.STORY_GENERATION_QUEUE_URL,
+                    QueueUrl=settings.WHISPR_TALES_QUEUE_URL,
                     MessageBody=json.dumps(message)
                 )
             # Update old media to inactive
@@ -518,37 +521,46 @@ class SceneDetailAPIView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     def post(self, request, story_pk, pk):
-        # return Response({'error': 'Invalid endpoint'}, status=status.HTTP_400_BAD_REQUEST)
         """Generate media for the scene."""
-        # Get the URL pattern name to determine which endpoint was called
         url_name = request.resolver_match.url_name
         media_type = url_name.split('-')[-1]
         if url_name == 'scene-generate-image' or url_name == 'scene-generate-audio':
-            sqs_client = boto3.client(
-                'sqs',
-                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-                region_name=settings.AWS_S3_REGION_NAME
-            )
-            
-            # Prepare the message
-            message = {
-                'story_id': story_pk,
-                'scene_id': pk,
-                'media_type': 'image' if url_name == 'scene-generate-image' else 'audio',
-                'action': 'generate_media'
-            }
-            
-            # Add voice_id for audio generation
-            if url_name == 'scene-generate-audio':
-                try:
+            try:
+                # Get user's active credits
+                user_credits = request.user.credits.filter(is_active=True).first()
+                scene = Scene.objects.filter(id=pk).first()
+                if not user_credits:
+                    return Response(
+                        {'error': 'No active credits found for user'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                # Check if user has enough credits
+                credit_cost =  math.ceil(CREDIT_COSTS[media_type] if media_type == 'image' else CREDIT_COSTS[media_type] * len(scene.content))
+                # Create job record
+                job_data = {
+                    'job_type': 'generate_media',
+                    'user': request.user.id,
+                    'story': story_pk,
+                    'scene': pk,
+                    'request_data': {
+                        'story_id': story_pk,
+                        'scene_id': pk,
+                        'media_type': 'image' if url_name == 'scene-generate-image' else 'audio',
+                        'action': 'generate_media',
+                        'credit_cost': credit_cost
+                    }
+                }
+
+                # Add voice_id for audio generation
+                if url_name == 'scene-generate-audio':
                     voice_id = request.data.get('voice_id')
                     if not voice_id:
                         return Response(
                             {'error': 'voice_id is required for audio generation'},
                             status=status.HTTP_400_BAD_REQUEST
                         )
-                    # check for previous and next media of the story, order by scene_id
+                    
                     # Get previous and next media ordered by scene_id
                     previous_request_ids = list(Media.objects.filter(
                         story_id=story_pk,
@@ -564,81 +576,80 @@ class SceneDetailAPIView(APIView):
                         is_active=True
                     ).order_by('scene__id').values_list('request_id', flat=True))
                     
-                    message['previous_request_ids'] = previous_request_ids if previous_request_ids else None
-                    message['next_request_ids'] = next_request_ids if next_request_ids else None
-                    message['voice_id'] = voice_id
-                except Exception as e:
-                    return Response(
-                        {'error': f'Error processing request data: {str(e)}'},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-            print(message)
-            # Send message to SQS queue
-            response = sqs_client.send_message(
-                QueueUrl=settings.STORY_GENERATION_QUEUE_URL,
-                MessageBody=json.dumps(message)
-            )
-            Media.objects.filter(story_id=story_pk, scene_id=pk, media_type=media_type, is_active=True).update(is_active=False)
-            return Response({
-                'message': 'Media generation request sent successfully',
-                'message_id': response['MessageId']
-            })
-        else:
-            return Response(
-                {'error': 'Invalid endpoint'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+                    job_data['request_data'].update({
+                        'previous_request_ids': previous_request_ids if previous_request_ids else None,
+                        'next_request_ids': next_request_ids if next_request_ids else None,
+                        'voice_id': voice_id
+                    })
 
-    def _generate_image(self, story_pk, pk):
-        """Generate an image for the scene."""
-        try:
-            # Initialize SQS client
-            sqs_client = boto3.client(
-                'sqs',
-                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-                region_name=settings.AWS_S3_REGION_NAME
-            )
-            
-            # Prepare the message
-            message = {
-                'story_id': story_pk,
-                'scene_id': pk,
-                'media_type': 'image',
-                'action': 'generate_media'
-            }
-            
-            # Send message to SQS queue
-            response = sqs_client.send_message(
-                QueueUrl=settings.STORY_GENERATION_QUEUE_URL,
-                MessageBody=json.dumps(message)
-            )
-            
-            return Response({
-                'message': 'Media generation request sent successfully',
-                'message_id': response['MessageId']
-            })
-            
-        except Exception as e:
-            print(e)
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-    def _generate_audio(self, story_pk, pk):
-        """Generate an audio for the scene."""
-        try:
-            # TODO: Implement audio generation logic
-            return Response(
-                {'error': 'Audio generation not implemented yet'},
-                status=status.HTTP_501_NOT_IMPLEMENTED
-            )
-        except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+                # Create and send job within a transaction
+                with transaction.atomic():
+                    # Create job
+                    serializer = JobCreateSerializer(data=job_data)
+                    if serializer.is_valid():
+                        job = serializer.save(user=request.user)
+                        # Create credit transaction record
+                        credit_transaction = CreditTransaction.objects.create(
+                            user=request.user,
+                            scene=scene,
+                            credits_used=credit_cost,
+                            transaction_type='debit'
+                        )
+                        
+                        # Link credit transaction to job
+                        job.credit_transaction = credit_transaction
+                        job.credit_cost = credit_cost
+                        job.save()
+                        
+                        # Find active media records
+                        active_media = Media.objects.filter(
+                            story_id=story_pk,
+                            scene_id=pk,
+                            media_type=media_type,
+                            is_active=True
+                        )
+                        print('active_media', active_media, active_media.first())
+                        
+                        # Get media_id before marking as inactive
+                        media_id = active_media[0].id if active_media.exists() else None
+                        print('active media is', media_id)
+                        
+                        # Mark them as inactive
+                        active_media.update(is_active=False)
+                        
+                        try:
+                            # Send job to SQS
+                            job = send_job_to_sqs(job, job.request_data, media_id)
+                            return Response(JobSerializer(job).data)
+                        except Exception as e:
+                            error_traceback = traceback.format_exc()
+                            print(f'Error in media generation:')
+                            print(f'Error: {str(e)}')
+                            print('Traceback:')
+                            print(error_traceback)
+                            # The job is already marked as failed in send_job_to_sqs
+                            return Response(
+                                {
+                                    'error': f'Failed to send job to queue: {str(e)}',
+                                    'traceback': error_traceback if settings.DEBUG else None
+                                },
+                                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                            )
+                    else:
+                        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            except Exception as e:
+                error_traceback = traceback.format_exc()
+                print(f'Error in media generation:')
+                print(f'Error: {str(e)}')
+                print('Traceback:')
+                print(error_traceback)
+                return Response(
+                    {
+                        'error': str(e),
+                        'traceback': error_traceback if settings.DEBUG else None
+                    },
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
 
 class MediaListCreateAPIView(APIView):
     """
@@ -1032,7 +1043,6 @@ class StoryPreviewView(APIView):
 
     def post(self, request, story_id):
         try:
-            # if the number of media is not equal to the number of scenes, return an error
             story = Story.objects.get(id=story_id, author=request.user)
             url_name = request.resolver_match.url_name
             format = url_name.split('-')[2]
@@ -1043,37 +1053,58 @@ class StoryPreviewView(APIView):
                     {'error': f'generate {format} for all scenes first'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            # Initialize SQS client
-            sqs_client = boto3.client(
-                'sqs',
-                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-                region_name=settings.AWS_S3_REGION_NAME
-            )
-            
-            # Prepare the message
-            message = {
-                'story_id': story_id,
-                'user_id': request.user.id,
-                'action': 'generate_pdf_preview' if url_name == 'story-preview-pdf' else 'generate_audio_preview' if url_name == 'story-preview-audio' else 'generate_video_preview' if url_name == 'story-preview-video' else 'generate_media'
+
+            # Create job record
+            job_type = {
+                'story-preview-pdf': 'generate_pdf_preview',
+                'story-preview-audio': 'generate_audio_preview',
+                'story-preview-video': 'generate_video_preview'
+            }.get(url_name, 'generate_media')
+
+            job_data = {
+                'job_type': job_type,
+                'user': request.user.id,
+                'story': story_id,
+                'request_data': {
+                    'story_id': story_id,
+                    'user_id': request.user.id,
+                    'action': job_type
+                }
             }
-            # Mark current revision as inactive
-            Revision.objects.filter(
-                story_id=story_id,
-                format=format if format != 'image' else 'pdf',
-                is_active=True,
-                deleted_at=None
-            ).update(is_active=False)
-            # Send message to SQS queue
-            response = sqs_client.send_message(
-                QueueUrl=settings.STORY_GENERATION_QUEUE_URL,
-                MessageBody=json.dumps(message)
-            )
-            print(f'successfully sent the message to sqs to {format} generation')
-            return Response({
-                'message': 'PDF generation request sent successfully',
-                'message_id': response['MessageId']
-            })
+
+            # Create and send job
+            serializer = JobCreateSerializer(data=job_data)
+            if serializer.is_valid():
+                try:
+                    with transaction.atomic():
+                        job = serializer.save(user=request.user)
+                        
+                        # Mark current revision as inactive
+                        Revision.objects.filter(
+                            story_id=story_id,
+                            format=format if format != 'image' else 'pdf',
+                            is_active=True,
+                            deleted_at=None
+                        ).update(is_active=False)
+                        
+                        # Send job to SQS
+                        job = send_job_to_sqs(job, job.request_data)
+                        return Response(JobSerializer(job).data)
+                except Exception as e:
+                    error_traceback = traceback.format_exc()
+                    print(f'Error in preview generation:')
+                    print(f'Error: {str(e)}')
+                    print('Traceback:')
+                    print(error_traceback)
+                    return Response(
+                        {
+                            'error': f'Failed to send job to queue: {str(e)}',
+                            'traceback': error_traceback if settings.DEBUG else None
+                        },
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                    )
+            else:
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
             
         except Story.DoesNotExist:
             return Response(
@@ -1766,7 +1797,7 @@ class StoryGenerateAPIView(APIView):
             openai_response = client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": "You are a creative story writer. Generate an engaging story of exactly 300 words. Your response must be in JSON format with two fields: 'title' and 'content'. The title should be on a single line, and the content should be the story text."},
+                    {"role": "system", "content": "You are a creative story writer. Generate an engaging story of exactly 200 words. Your response must be in JSON format with two fields: 'title' and 'content'. The title should be on a single line, and the content should be the story text."},
                     {"role": "user", "content": "Generate a story in JSON format with 'title' and 'content' fields."}
                 ],
                 max_tokens=500,
@@ -1783,20 +1814,38 @@ class StoryGenerateAPIView(APIView):
                 # Deduct credits
                 return JsonResponse(story_data)
                 
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
+                error_traceback = traceback.format_exc()
+                print(f'Error parsing story generation response:')
+                print(f'Error: {str(e)}')
+                print('Traceback:')
+                print(error_traceback)
                 return JsonResponse(
-                    {"error": "Failed to parse story generation response"},
+                    {"error": "Failed to parse story generation response",
+                     "traceback": error_traceback if settings.DEBUG else None},
                     status=500
                 )
             except ValueError as e:
+                error_traceback = traceback.format_exc()
+                print(f'Error validating story data:')
+                print(f'Error: {str(e)}')
+                print('Traceback:')
+                print(error_traceback)
                 return JsonResponse(
-                    {"error": str(e)},
+                    {"error": str(e),
+                     "traceback": error_traceback if settings.DEBUG else None},
                     status=500
                 )
 
         except Exception as e:
+            error_traceback = traceback.format_exc()
+            print(f'Error generating story:')
+            print(f'Error: {str(e)}')
+            print('Traceback:')
+            print(error_traceback)
             return Response(
-                {'error': f'Failed to generate story: {str(e)}'}, 
+                {'error': f'Failed to generate story: {str(e)}',
+                 'traceback': error_traceback if settings.DEBUG else None}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -2074,4 +2123,119 @@ class ValidateReferralView(APIView):
                 {'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+class JobViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing jobs.
+    
+    list:
+    Return a list of all jobs for the current user.
+    
+    retrieve:
+    Return the details of a specific job.
+    
+    create:
+    Create a new job.
+    
+    update:
+    Update a job's status and details.
+    
+    destroy:
+    Cancel a job.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = JobSerializer
+
+    def get_queryset(self):
+        """Return jobs for the current user."""
+        return Job.objects.filter(user=self.request.user)
+
+    def get_serializer_class(self):
+        """Return appropriate serializer class."""
+        if self.action == 'create':
+            return JobCreateSerializer
+        return JobSerializer
+
+    def perform_create(self, serializer):
+        """Create a new job and send to SQS."""
+        try:
+            # Save job to database first
+            job = serializer.save(user=self.request.user)
+            
+            # Send to SQS using utility function
+            job = send_job_to_sqs(job, job.request_data)
+            return job
+
+        except Exception as e:
+            error_traceback = traceback.format_exc()
+            print(f'Error creating job:')
+            print(f'Error: {str(e)}')
+            print('Traceback:')
+            print(error_traceback)
+            # The job is already marked as failed in send_job_to_sqs
+            raise
+
+    @action(detail=True, methods=['post'])
+    def retry(self, request, pk=None):
+        """Retry a failed job."""
+        try:
+            job = self.get_object()
+            
+            if job.status != 'failed':
+                return Response(
+                    {'error': 'Only failed jobs can be retried'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            if job.schedule_retry():
+                try:
+                    # Re-send to SQS using utility function
+                    job = send_job_to_sqs(job, job.request_data)
+                    return Response({'message': 'Job scheduled for retry'})
+                except Exception as e:
+                    error_traceback = traceback.format_exc()
+                    print(f'Error retrying job {job.job_id}:')
+                    print(f'Error: {str(e)}')
+                    print('Traceback:')
+                    print(error_traceback)
+                    # The job is already marked as failed in send_job_to_sqs
+                    return Response(
+                        {
+                            'error': f'Failed to retry job: {str(e)}',
+                            'traceback': error_traceback if settings.DEBUG else None
+                        },
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                    )
+            else:
+                return Response(
+                    {'error': 'Maximum retry attempts reached'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        except Exception as e:
+            error_traceback = traceback.format_exc()
+            print(f'Error in job retry endpoint:')
+            print(f'Error: {str(e)}')
+            print('Traceback:')
+            print(error_traceback)
+            return Response(
+                {
+                    'error': str(e),
+                    'traceback': error_traceback if settings.DEBUG else None
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        """Cancel a pending or processing job."""
+        job = self.get_object()
+        
+        if job.status not in ['pending', 'processing']:
+            return Response(
+                {'error': 'Only pending or processing jobs can be cancelled'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        job.cancel()
+        return Response({'message': 'Job cancelled successfully'})
 

@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Story, Scene, Media, Revision, Credits, CreditTransaction, Order, Payment
+from .models import Story, Scene, Media, Revision, Credits, CreditTransaction, Order, Payment, Job
 
 User = get_user_model()
 
@@ -90,6 +90,7 @@ class StoryCreateSerializer(serializers.ModelSerializer):
         validated_data['author'] = self.context['request'].user
         # Call parent class's create() method with the validated data including author
         return super().create(validated_data) 
+
 class RevisionSerializer(serializers.ModelSerializer):
     created_by = serializers.StringRelatedField()
     story = serializers.StringRelatedField()
@@ -120,3 +121,26 @@ class CreditTransactionSerializer(serializers.ModelSerializer):
         model = CreditTransaction
         fields = ['id', 'user', 'credits_used', 'transaction_type', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+class JobSerializer(serializers.ModelSerializer):
+    """Serializer for the Job model."""
+    class Meta:
+        model = Job
+        fields = [
+            'id', 'message_id', 'job_type', 'status',
+            'user', 'story', 'scene', 'request_data', 'response_data',
+            'error_message', 'created_at', 'started_at', 'completed_at',
+            'updated_at', 'retry_count', 'max_retries', 'next_retry_at'
+        ]
+        read_only_fields = [
+            'id', 'message_id', 'created_at', 'started_at',
+            'completed_at', 'updated_at', 'retry_count', 'next_retry_at'
+        ]
+
+class JobCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating new jobs."""
+    class Meta:
+        model = Job
+        fields = [
+            'job_type', 'user', 'story', 'scene', 'request_data'
+        ]

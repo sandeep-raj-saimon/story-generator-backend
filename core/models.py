@@ -4,6 +4,7 @@ from django.utils.translation import gettext_lazy as _
 from django.conf import settings
 from django.utils import timezone
 import uuid
+from datetime import timedelta
 
 class User(AbstractUser):
     """Custom user model with additional fields"""
@@ -263,3 +264,114 @@ class Payment(models.Model):
     
     def __str__(self):
         return f"{self.order.user.username} - {self.order.amount}"
+
+class Job(models.Model):
+    """
+    Model to track AWS SQS jobs for reliability and monitoring.
+    """
+    JOB_STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('processing', 'Processing'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+        ('cancelled', 'Cancelled')
+    ]
+
+    JOB_TYPE_CHOICES = [
+        ('generate_media', 'Generate Media'),
+        ('generate_pdf_preview', 'Generate PDF Preview'),
+        ('generate_audio_preview', 'Generate Audio Preview'),
+        ('generate_video_preview', 'Generate Video Preview'),
+        ('generate_entire_audio', 'Generate Entire Audio')
+    ]
+
+    # Job identification
+    message_id = models.CharField(max_length=100, unique=True, null=True, blank=True, help_text="AWS SQS Message ID")
+    job_type = models.CharField(max_length=50, choices=JOB_TYPE_CHOICES)
+    status = models.CharField(max_length=20, choices=JOB_STATUS_CHOICES, default='pending')
+    
+    # Related objects
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='jobs')
+    story = models.ForeignKey(Story, on_delete=models.CASCADE, related_name='jobs', null=True, blank=True)
+    scene = models.ForeignKey(Scene, on_delete=models.CASCADE, related_name='jobs', null=True, blank=True)
+    
+    # Job details
+    request_data = models.JSONField(help_text="Original request data sent to SQS")
+    response_data = models.JSONField(null=True, blank=True, help_text="Response data from the job")
+    error_message = models.TextField(null=True, blank=True, help_text="Error message if job failed")
+    
+    # Credit information
+    credit_cost = models.PositiveIntegerField(
+        default=0,
+        help_text="Number of credits required for this job"
+    )
+    credit_transaction = models.ForeignKey(
+        CreditTransaction,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='jobs',
+        help_text="Associated credit transaction for this job"
+    )
+    
+    # Timing
+    created_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    # Retry information
+    retry_count = models.IntegerField(default=0)
+    max_retries = models.IntegerField(default=3)
+    next_retry_at = models.DateTimeField(null=True, blank=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['status']),
+            models.Index(fields=['job_type']),
+            models.Index(fields=['created_at']),
+            models.Index(fields=['user', 'status']),
+        ]
+
+    def __str__(self):
+        return f"{self.job_type} - {self.id} ({self.status})"
+
+    def mark_as_processing(self):
+        """Mark job as processing and set start time."""
+        self.status = 'processing'
+        self.started_at = timezone.now()
+        self.save()
+
+    def mark_as_completed(self, response_data=None):
+        """Mark job as completed and set completion time."""
+        self.status = 'completed'
+        self.completed_at = timezone.now()
+        if response_data:
+            self.response_data = response_data
+        self.save()
+
+    def mark_as_failed(self, error_message):
+        """Mark job as failed and store error message."""
+        self.status = 'failed'
+        self.completed_at = timezone.now()
+        self.error_message = error_message
+        self.save()
+
+    def schedule_retry(self):
+        """Schedule a retry for failed jobs."""
+        if self.retry_count < self.max_retries:
+            self.retry_count += 1
+            # Exponential backoff: 5min, 15min, 45min
+            delay_minutes = 5 * (3 ** (self.retry_count - 1))
+            self.next_retry_at = timezone.now() + timedelta(minutes=delay_minutes)
+            self.status = 'pending'
+            self.save()
+            return True
+        return False
+
+    def cancel(self):
+        """Cancel the job."""
+        self.status = 'cancelled'
+        self.completed_at = timezone.now()
+        self.save()
