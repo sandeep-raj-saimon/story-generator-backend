@@ -1774,8 +1774,15 @@ class PaymentView(APIView):
                 return Response({'message': f'{credit_to_be_added} credits added to your account'}, status=status.HTTP_200_OK)
                 
             except Exception as e:
-                print('error in payment:', e)
-                return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+                error_traceback = traceback.format_exc()
+                print('Error in payment:')
+                print(f'Error: {str(e)}')
+                print('Traceback:')
+                print(error_traceback)
+                return Response(
+                    {'error': str(e), 'traceback': error_traceback if settings.DEBUG else None}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
         else:
             return Response({'error': 'Invalid payment signature'}, status=status.HTTP_400_BAD_REQUEST)
 
