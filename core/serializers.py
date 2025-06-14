@@ -14,7 +14,7 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ('id', 'username', 'email', 'bio', 'profile_picture', 'credits', 'referral_code')
+        fields = ('id', 'username', 'email', 'bio', 'profile_picture', 'credits', 'referral_code', 'language')
         read_only_fields = ('id',)
 
     def get_credits(self, obj):
@@ -29,7 +29,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ('username', 'email', 'password', 'referral_code')
+        fields = ('username', 'email', 'password', 'referral_code', 'language')
 
     def create(self, validated_data):
         user = User.objects.create_user(
@@ -75,9 +75,9 @@ class StorySerializer(serializers.ModelSerializer):
         model = Story
         fields = (
             'id', 'title', 'content', 'author', 'created_at',
-            'updated_at', 'is_public', 'word_count', 'scenes', 'is_default'
+            'updated_at', 'is_public', 'word_count', 'scenes', 'is_default', 'language'
         )
-        read_only_fields = ('id', 'author', 'created_at', 'updated_at', 'word_count', 'is_default')
+        read_only_fields = ('id', 'author', 'created_at', 'updated_at', 'word_count', 'is_default', 'language')
 
 class StoryCreateSerializer(serializers.ModelSerializer):
     class Meta:
@@ -99,10 +99,10 @@ class RevisionSerializer(serializers.ModelSerializer):
         model = Revision
         fields = [
             'id', 'story', 'format', 'sub_format', 'url',
-            'created_at', 'created_by', 'version', 'is_current',
+            'created_at', 'created_by', 'is_current',
             'metadata'
         ]
-        read_only_fields = ['created_at', 'version', 'is_current'] 
+        read_only_fields = ['created_at', 'is_current'] 
 
 class OrderSerializer(serializers.ModelSerializer):
     class Meta:

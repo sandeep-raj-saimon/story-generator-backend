@@ -2,12 +2,20 @@ import boto3
 import json
 import traceback
 from django.conf import settings
+import redis
+import os
 
 CREDIT_COSTS = {
         'image': 100,  # 1 credit per image
         'audio': 0.3,  # 2 credits per audio
     }
 
+def redis_client():
+    return redis.Redis(
+        host=os.getenv('REDISHOST'),
+        port=os.getenv('REDISPORT'),
+        password=os.getenv('REDISPASSWORD')
+    )
 def send_job_to_sqs(job, request_data, media_id=None):
     """
     Send a job to AWS SQS queue and update the job with the message ID.
@@ -44,7 +52,6 @@ def send_job_to_sqs(job, request_data, media_id=None):
         # Update job with message ID
         job.message_id = response['MessageId']
         job.save()
-
         return job
 
     except Exception as e:
@@ -56,3 +63,30 @@ def send_job_to_sqs(job, request_data, media_id=None):
         # Mark job as failed
         job.mark_as_failed(f"Failed to send to SQS: {str(e)}\nTraceback:\n{error_traceback}")
         raise
+
+def create_redis_lock(scene_id, media_type):
+    """
+    Create a Redis lock for media generation.
+    
+    Args:
+        scene_id (str): The ID of the scene
+        media_type (str): The type of media being generated ('image' or 'audio')
+        
+    Returns:
+        bool: True if lock was created, False if lock already exists
+    """
+    try:
+        # Create Redis lock key
+        lock_key = f"scene_{scene_id}_{media_type}_lock"
+        
+        # Check if lock exists
+        if redis_client().exists(lock_key):
+            return False
+            
+        # Set lock with 5 minute expiry
+        redis_client.setex(lock_key, 300, 'locked')
+        return True
+        
+    except Exception as e:
+        print(f"Error creating Redis lock: {str(e)}")
+        return False

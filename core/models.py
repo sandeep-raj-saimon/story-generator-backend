@@ -32,7 +32,14 @@ class User(AbstractUser):
         related_name='referrals',
         help_text='User who referred this user'
     )
-    
+    language = models.CharField(
+        _('language'),
+        max_length=50,
+        blank=True,
+        null=True,
+        default='en-US',
+        help_text='Language of the user'
+    )
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = ['username']
 
@@ -61,6 +68,14 @@ class Story(models.Model):
     word_count = models.IntegerField(_('word count'), default=0)
     is_active = models.BooleanField(_('is active'), default=True)
     is_default = models.BooleanField(_('is_default'), default=False)
+    is_public = models.BooleanField(_('is_public'), default=False)
+    language = models.CharField(
+        _('language'),
+        max_length=50,
+        blank=True,
+        null=True,
+        default='en-US',
+        help_text='Language of the story')
     class Meta:
         verbose_name = _('story')
         verbose_name_plural = _('stories')

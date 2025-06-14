@@ -47,16 +47,8 @@ from django.utils import timezone
 import resend
 import traceback
 from .utils import *
-from .utils import send_job_to_sqs
 
 User = get_user_model()
-
-# Initialize Redis client
-redis_client = redis.Redis(
-    host=os.getenv('REDISHOST'),
-    port=os.getenv('REDISPORT'),
-    password=os.getenv('REDISPASSWORD')
-)
 
 DISCOUNT_PERCENTAGE = 10
 REFERRAL_FREE_CREDITS = 300
@@ -68,10 +60,10 @@ DEFAULT_PRICING = {
             {
                 'id': 4,
                 'name': 'Studio',
-                'price': 29.99,
-                'credits': 7500,
+                'price': 50,
+                'story_limit': 150,
                 'features': [
-                    '7500 credits',
+                    '150 stories',
                     'Image and Audio generation',
                     'Export to PDF and Mp3 formats'
                 ]
@@ -79,10 +71,10 @@ DEFAULT_PRICING = {
             {
                 'id': 3,
                 'name': 'Pro',
-                'price': 14.99,
-                'credits': 3000,
+                'price': 20,
+                'story_limit': 50,
                 'features': [
-                    '3000 credits',
+                    '50 stories',
                     'Image and Audio generation',
                     'Export to PDF and Mp3 formats'
                 ]
@@ -90,10 +82,10 @@ DEFAULT_PRICING = {
             {
                 'id': 2,
                 'name': 'Standard',
-                'price': 1,
-                'credits': 1000,
+                'price': 10,
+                'story_limit': 20,
                 'features': [
-                    '1000 credits',
+                    '20 stories',
                     'Only Image generation',
                     'Export to PDF format'
                 ]
@@ -102,9 +94,9 @@ DEFAULT_PRICING = {
                 'id': 1,
                 'name': 'Free',
                 'price': 0,
-                'credits': 300,
+                'story_limit': 1,
                 'features': [
-                    '300 credits per month',
+                    '1 story per month',
                     'Basic story creation'
                 ]
             }
@@ -117,9 +109,9 @@ DEFAULT_PRICING = {
                 'id': 4,
                 'name': 'Studio',
                 'price': 499,
-                'credits': 7500,
+                'story_limit': 15,
                 'features': [
-                    '7500 credits',
+                    '15 stories per month',
                     'Image and Audio generation',
                     'Export to PDF and Mp3 formats'
                 ]
@@ -128,9 +120,9 @@ DEFAULT_PRICING = {
                 'id': 3,
                 'name': 'Premium',
                 'price': 249,
-                'credits': 3000,
+                'story_limit': 7,
                 'features': [
-                    '3000 credits',
+                    '7 stories per month',
                     'Image and Audio generation',
                     'Export to PDF and Mp3 formats'
                 ]
@@ -138,22 +130,23 @@ DEFAULT_PRICING = {
             {
                 'id': 2,
                 'name': 'Standard',
-                'price': 4.99,
-                'credits': 1000,
+                'price': 100,
+                'story_limit': 3,
                 'features': [
-                    '1000 credits',
-                    'Only Image generation',
-                    'Export to PDF format'
+                    '3 stories per month',
+                    'Image and Audio generation',
+                    'Export to PDF and Mp3 formats'
                 ]
             },
             {
                 'id': 1,
                 'name': 'Free',
                 'price': 0,
-                'credits': 300,
+                'story_limit': 1,
                 'features': [
-                    '300 credits per month',
-                    'Basic story creation'
+                    '1 story per month',
+                    'Image and Audio generation',
+                    'Export to PDF and Mp3 formats'
                 ]
             }
         ]
@@ -176,7 +169,7 @@ class PricingConfigView(APIView):
 
         # Try to get pricing from Redis
         pricing_key = f'pricing:{domain}'
-        pricing_data = redis_client.get(pricing_key)
+        pricing_data = redis_client().get(pricing_key)
 
         if pricing_data:
             return Response(json.loads(pricing_data))
@@ -184,7 +177,7 @@ class PricingConfigView(APIView):
         # If not in Redis, use default pricing
         if domain in DEFAULT_PRICING:
             # Store in Redis for future use
-            redis_client.set(pricing_key, json.dumps(DEFAULT_PRICING[domain]))
+            redis_client().set(pricing_key, json.dumps(DEFAULT_PRICING[domain]))
             return Response(DEFAULT_PRICING[domain])
         
         # If domain not found, return .com pricing
@@ -207,7 +200,7 @@ class PricingConfigUpdateView(APIView):
             return Response({'error': 'Domain and pricing are required'}, status=400)
 
         pricing_key = f'pricing:{domain}'
-        redis_client.set(pricing_key, json.dumps(pricing))
+        redis_client().set(pricing_key, json.dumps(pricing))
         
         return Response({'message': 'Pricing configuration updated successfully'})
 
@@ -221,6 +214,7 @@ class StoryListCreateAPIView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
+        print("request.user", request.user)
         """List all stories for the current user."""
         stories = Story.objects.filter(author=request.user, is_active=True)
         serializer = StorySerializer(stories, many=True)
@@ -396,7 +390,7 @@ class StorySegmentAPIView(APIView):
             
             # Call ChatGPT API
             response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-4.1",
                 messages=[
                     {"role": "system", "content": "You are a story segmentation assistant. Break stories into logical scenes. You must respond with valid JSON only."},
                     {"role": "user", "content": prompt}
@@ -1048,7 +1042,7 @@ class StoryPreviewView(APIView):
             format = url_name.split('-')[2]
             format = 'image' if format == 'pdf' else 'audio' if format == 'audio' else 'video' if format == 'video' else 'media'
             
-            if story.scenes.filter(is_active=True).count() != story.media.filter(media_type=format, is_active=True).count():
+            if format != 'video' and story.scenes.filter(is_active=True).count() != story.media.filter(media_type=format, is_active=True).count():
                 return Response(
                     {'error': f'generate {format} for all scenes first'},
                     status=status.HTTP_400_BAD_REQUEST
@@ -1212,7 +1206,8 @@ class RevisionCurrentAPIView(APIView):
         revisions = Revision.objects.filter(
             story_id=story_id,
             story__author=request.user,
-            is_current=True
+            is_current=True,
+            url__isnull=False
         )
         serializer = RevisionSerializer(revisions, many=True)
         return Response(serializer.data)
@@ -1360,9 +1355,9 @@ class CreateOrderView(APIView):
             return Response({'error': 'Invalid plan'}, status=status.HTTP_400_BAD_REQUEST)
         
         amount = round(plan['price'] * (1 - (DISCOUNT_PERCENTAGE) / 100), 2) if referring_user else plan['price']
-        receipt = redis_client.incr('prod_razorpay_last_order_id') if redis_client.get('is_razorpay_test') else redis_client.incr('prod_razorpay_last_order_id')
+        receipt = redis_client().incr('prod_razorpay_last_order_id') if redis_client().get('is_razorpay_test') else redis_client().incr('prod_razorpay_last_order_id')
 
-        client = razorpay.Client(auth=(settings.TEST_RAZORPAY_KEY_ID, settings.TEST_RAZORPAY_KEY_SECRET)) if redis_client.get('is_razorpay_test') else razorpay.Client(auth=(settings.PROD_RAZORPAY_KEY_ID, settings.PROD_RAZORPAY_KEY_SECRET))
+        client = razorpay.Client(auth=(settings.TEST_RAZORPAY_KEY_ID, settings.TEST_RAZORPAY_KEY_SECRET)) if redis_client().get('is_razorpay_test') else razorpay.Client(auth=(settings.PROD_RAZORPAY_KEY_ID, settings.PROD_RAZORPAY_KEY_SECRET))
         order_params = {
             'amount': amount*100,
             'currency': currency,
@@ -1672,7 +1667,7 @@ class PaymentView(APIView):
 
     def post(self, request):
         """Create a payment."""
-        client = razorpay.Client(auth=(settings.TEST_RAZORPAY_KEY_ID, settings.TEST_RAZORPAY_KEY_SECRET)) if redis_client.get('is_razorpay_test') else razorpay.Client(auth=(settings.PROD_RAZORPAY_KEY_ID, settings.PROD_RAZORPAY_KEY_SECRET))
+        client = razorpay.Client(auth=(settings.TEST_RAZORPAY_KEY_ID, settings.TEST_RAZORPAY_KEY_SECRET)) if redis_client().get('is_razorpay_test') else razorpay.Client(auth=(settings.PROD_RAZORPAY_KEY_ID, settings.PROD_RAZORPAY_KEY_SECRET))
         request.body = request.data
 
         is_verified = client.utility.verify_payment_signature({
@@ -1719,7 +1714,7 @@ class PaymentView(APIView):
                                 )
 
                     # Add purchased credits to the user who made the payment
-                    credit_to_be_added = next(p for p in DEFAULT_PRICING[request.query_params.get('domain')]['plans'] if p['id'] == int(request.data.get('plan_id')))['credits']
+                    credit_to_be_added = next(p for p in DEFAULT_PRICING[request.query_params.get('domain')]['plans'] if p['id'] == int(request.data.get('plan_id')))['story_limit']
                     credits = order.user.credits.filter(is_active=True).first()
                     credits.credits_remaining += credit_to_be_added
                     credits.save()
@@ -1801,10 +1796,11 @@ class StoryGenerateAPIView(APIView):
             client = OpenAI(
                 api_key=settings.CHATGPT_OPENAI_API_KEY
             )
+            print('request.user.language', request.user.language)
             openai_response = client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": "You are a creative story writer. Generate an engaging story of exactly 200 words. Your response must be in JSON format with two fields: 'title' and 'content'. The title should be on a single line, and the content should be the story text."},
+                    {"role": "system", "content": f"You are a creative story writer. Generate an engaging story of exactly 200 words in {'English-US' if request.user.language == 'en-US' else 'Hindi'}. Your response must be in JSON format with two fields: 'title' and 'content'. The title should be on a single line, and the content should be the story text."},
                     {"role": "user", "content": "Generate a story in JSON format with 'title' and 'content' fields."}
                 ],
                 max_tokens=500,
@@ -1884,7 +1880,7 @@ class ForgotPasswordView(APIView):
             expiry_seconds = int((expiry - timezone.now()).total_seconds())
             
             # Store the token in Redis with expiry
-            redis_client.setex(
+            redis_client().setex(
                 f'password_reset:{token}',
                 expiry_seconds,  # Use seconds instead of datetime
                 json.dumps({
@@ -2046,7 +2042,7 @@ class ResetPasswordView(APIView):
             )
         
         # Get token data from Redis
-        token_data = redis_client.get(f'password_reset:{token}')
+        token_data = redis_client().get(f'password_reset:{token}')
         if not token_data:
             return Response(
                 {'error': 'Invalid or expired token'},
@@ -2062,7 +2058,7 @@ class ResetPasswordView(APIView):
             user.save()
             
             # Delete the used token
-            redis_client.delete(f'password_reset:{token}')
+            redis_client().delete(f'password_reset:{token}')
             
             return Response({
                 'message': 'Password reset successful'
