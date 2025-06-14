@@ -216,8 +216,13 @@ class StoryListCreateAPIView(APIView):
 
     def get(self, request):
         print("request.user", request.user)
+        other_user = True if request.query_params.get('other_user') == 'true' else False
+        is_public = True if request.query_params.get('is_public') == 'true' else False
         """List all stories for the current user."""
-        stories = Story.objects.filter(author=request.user, is_active=True)
+        if other_user:
+            stories = Story.objects.filter(is_active=True, is_public=is_public)
+        else:
+            stories = Story.objects.filter(author=request.user, is_active=True)
         serializer = StorySerializer(stories, many=True)
         return Response(serializer.data)
 
