@@ -64,7 +64,7 @@ DEFAULT_PRICING = {
                 'story_limit': 150,
                 'features': [
                     '150 stories',
-                    'Image and Audio generation',
+                    'Image and Audio generation (can be stitched into video)',
                     'Export to PDF and Mp3 formats'
                 ]
             },
@@ -75,7 +75,7 @@ DEFAULT_PRICING = {
                 'story_limit': 50,
                 'features': [
                     '50 stories',
-                    'Image and Audio generation',
+                    'Image and Audio generation (can be stitched into video)',
                     'Export to PDF and Mp3 formats'
                 ]
             },
@@ -86,7 +86,7 @@ DEFAULT_PRICING = {
                 'story_limit': 20,
                 'features': [
                     '20 stories',
-                    'Only Image generation',
+                    'Image and Audio generation (can be stitched into video)',
                     'Export to PDF format'
                 ]
             },
@@ -96,8 +96,9 @@ DEFAULT_PRICING = {
                 'price': 0,
                 'story_limit': 1,
                 'features': [
-                    '1 story per month',
-                    'Basic story creation'
+                    '1 story',
+                    'Image and Audio generation (can be stitched into video)',
+                    'Export to PDF and Mp3 formats'
                 ]
             }
         ]
@@ -108,22 +109,22 @@ DEFAULT_PRICING = {
             {
                 'id': 4,
                 'name': 'Studio',
-                'price': 499,
-                'story_limit': 15,
+                'price': 500,
+                'story_limit': 25,
                 'features': [
-                    '15 stories per month',
-                    'Image and Audio generation',
+                    '25 stories',
+                    'Image and Audio generation (can be stitched into video)',
                     'Export to PDF and Mp3 formats'
                 ]
             },
             {
                 'id': 3,
                 'name': 'Premium',
-                'price': 249,
-                'story_limit': 7,
+                'price': 200,
+                'story_limit': 10,
                 'features': [
-                    '7 stories per month',
-                    'Image and Audio generation',
+                    '10 stories',
+                    'Image and Audio generation (can be stitched into video)',
                     'Export to PDF and Mp3 formats'
                 ]
             },
@@ -131,10 +132,10 @@ DEFAULT_PRICING = {
                 'id': 2,
                 'name': 'Standard',
                 'price': 100,
-                'story_limit': 3,
+                'story_limit': 4,
                 'features': [
-                    '3 stories per month',
-                    'Image and Audio generation',
+                    '4 stories',
+                    'Image and Audio generation (can be stitched into video)',
                     'Export to PDF and Mp3 formats'
                 ]
             },
@@ -144,8 +145,8 @@ DEFAULT_PRICING = {
                 'price': 0,
                 'story_limit': 1,
                 'features': [
-                    '1 story per month',
-                    'Image and Audio generation',
+                    '1 story',
+                    'Image and Audio generation (can be stitched into video)',
                     'Export to PDF and Mp3 formats'
                 ]
             }
