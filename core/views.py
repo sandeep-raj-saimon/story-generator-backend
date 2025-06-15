@@ -841,23 +841,7 @@ class UserRegistrationAPIView(APIView):
             user = serializer.save()
             # Generate tokens
             refresh = RefreshToken.for_user(user)
-            # Create a dummy story by copying story with id=1
-            try:
-                template_story = Story.objects.get(id=1)
-                
-                # Create new story with copied data
-                Story.objects.create(
-                    title=template_story.title,
-                    content=template_story.content,
-                    author=user,
-                    is_public=template_story.is_public,
-                    word_count=template_story.word_count,
-                    is_default=True
-                )
-
-            except Story.DoesNotExist:
-                # If template story doesn't exist, continue without creating dummy story
-                pass
+            # give one credit to the user
             return Response({
                 'user': UserSerializer(user).data,
                 'refresh': str(refresh),
