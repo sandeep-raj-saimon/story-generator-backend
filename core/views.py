@@ -51,7 +51,7 @@ from .utils import *
 User = get_user_model()
 
 DISCOUNT_PERCENTAGE = 10
-REFERRAL_FREE_CREDITS = 300
+REFERRAL_FREE_CREDITS = 1
 # Default pricing configurations
 DEFAULT_PRICING = {
     'com': {
@@ -248,13 +248,19 @@ class StoryDetailAPIView(APIView):
 
     def get_object(self, pk):
         """Get story object or return 404."""
-        return get_object_or_404(Story, pk=pk, author=self.request.user)
+        return get_object_or_404(Story, pk=pk)
 
     def get(self, request, pk):
         """Retrieve a story."""
         story = self.get_object(pk)
-        serializer = StorySerializer(story)
-        return Response(serializer.data)
+        if story.is_public:
+            serializer = StorySerializer(story)
+            return Response(serializer.data)
+        else:
+            return Response(
+                {"error": "Story is not public"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
     def put(self, request, pk):
         """Update a story."""
