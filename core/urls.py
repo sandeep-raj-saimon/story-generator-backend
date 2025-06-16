@@ -19,6 +19,11 @@ urlpatterns = [
     path('stories/<int:pk>/generate-bulk-audio/', StoryDetailAPIView.as_view(), name='story-generate-bulk-audio'),
     path('stories/generate/', StoryGenerateAPIView.as_view(), name='dummy-story-generate'),
     path('stories/<int:pk>/segment/', StorySegmentAPIView.as_view(), name='story-segment'),
+    
+    # Public story endpoints (no authentication required)
+    path('stories/public/', PublicStoryListAPIView.as_view(), name='public-story-list'),
+    path('stories/public/<int:pk>/', PublicStoryDetailAPIView.as_view(), name='public-story-detail'),
+    path('stories/public/<int:story_id>/revisions/', PublicStoryRevisionsAPIView.as_view(), name='public-story-revisions'),
 
     # Scene endpoints
     path('stories/<int:story_pk>/scenes/', SceneListCreateAPIView.as_view(), name='scene-list-create'),

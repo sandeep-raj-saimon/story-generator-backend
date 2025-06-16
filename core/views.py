@@ -2238,3 +2238,106 @@ class JobViewSet(viewsets.ModelViewSet):
         job.cancel()
         return Response({'message': 'Job cancelled successfully'})
 
+class PublicStoryListAPIView(APIView):
+    """
+    API endpoint for listing public stories without authentication.
+    
+    GET /stories/public/ - List all public stories
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        """List all public stories."""
+        # Get query parameters
+        page = int(request.query_params.get('page', 1))
+        page_size = int(request.query_params.get('page_size', 10))
+        search = request.query_params.get('search', '')
+
+        # Filter public stories
+        stories = Story.objects.filter(is_active=True, is_public=True)
+        
+        # Apply search filter if provided
+        if search:
+            stories = stories.filter(
+                Q(title__icontains=search) |
+                Q(content__icontains=search) |
+                Q(author__username__icontains=search)
+            )
+        
+        # Order by creation date (newest first)
+        stories = stories.order_by('-created_at')
+        
+        # Calculate pagination
+        total_count = stories.count()
+        start = (page - 1) * page_size
+        end = start + page_size
+        
+        # Get paginated stories
+        paginated_stories = stories[start:end]
+        
+        # Serialize the stories
+        serializer = StorySerializer(paginated_stories, many=True)
+        
+        # Return paginated response
+        return Response({
+            'results': serializer.data,
+            'total_count': total_count,
+            'total_pages': (total_count + page_size - 1) // page_size,
+            'current_page': page,
+            'page_size': page_size
+        })
+
+
+class PublicStoryDetailAPIView(APIView):
+    """
+    API endpoint for retrieving public story details without authentication.
+    
+    GET /stories/public/{id}/ - Retrieve a public story
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def get_object(self, pk):
+        """Get public story object or return 404."""
+        return get_object_or_404(Story, pk=pk, is_active=True, is_public=True)
+
+    def get(self, request, pk):
+        """Retrieve a public story."""
+        story = self.get_object(pk)
+        serializer = StorySerializer(story)
+        return Response(serializer.data)
+
+class PublicStoryRevisionsAPIView(APIView):
+    """
+    API endpoint for retrieving public story revisions without authentication.
+    
+    GET /stories/public/{story_id}/revisions/ - Retrieve revisions for a public story
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, story_id):
+        """Get revisions for a public story."""
+        try:
+            # Verify the story exists and is public
+            story = get_object_or_404(Story, id=story_id, is_active=True, is_public=True)
+            
+            # Get all revisions for this story
+            revisions = Revision.objects.filter(
+                story_id=story_id,
+                deleted_at__isnull=True,
+                url__isnull=False
+            ).order_by('-created_at')
+            
+            serializer = RevisionSerializer(revisions, many=True)
+            return Response(serializer.data)
+            
+        except Story.DoesNotExist:
+            return Response(
+                {'error': 'Story not found or not public'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
