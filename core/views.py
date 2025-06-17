@@ -51,7 +51,7 @@ from .utils import *
 User = get_user_model()
 
 DISCOUNT_PERCENTAGE = 10
-REFERRAL_FREE_CREDITS = 1
+REFERRAL_FREE_CREDITS = 300
 # Default pricing configurations
 DEFAULT_PRICING = {
     'com': {
@@ -61,9 +61,9 @@ DEFAULT_PRICING = {
                 'id': 4,
                 'name': 'Studio',
                 'price': 50,
-                'story_limit': 150,
+                'credits': 6000,
                 'features': [
-                    '150 stories',
+                    '6000 credits',
                     'Image and Audio generation (can be stitched into video)',
                     'Export to PDF and Mp3 formats'
                 ]
@@ -72,9 +72,9 @@ DEFAULT_PRICING = {
                 'id': 3,
                 'name': 'Pro',
                 'price': 20,
-                'story_limit': 50,
+                'credits': 2500,
                 'features': [
-                    '50 stories',
+                    '2500 credits',
                     'Image and Audio generation (can be stitched into video)',
                     'Export to PDF and Mp3 formats'
                 ]
@@ -83,9 +83,9 @@ DEFAULT_PRICING = {
                 'id': 2,
                 'name': 'Standard',
                 'price': 10,
-                'story_limit': 20,
+                'credits': 1000,
                 'features': [
-                    '20 stories',
+                    '1000 credits',
                     'Image and Audio generation (can be stitched into video)',
                     'Export to PDF format'
                 ]
@@ -94,9 +94,9 @@ DEFAULT_PRICING = {
                 'id': 1,
                 'name': 'Free',
                 'price': 0,
-                'story_limit': 1,
+                'credits': 100,
                 'features': [
-                    '1 story',
+                    '100 credits',
                     'Image and Audio generation (can be stitched into video)',
                     'Export to PDF and Mp3 formats'
                 ]
@@ -110,9 +110,9 @@ DEFAULT_PRICING = {
                 'id': 4,
                 'name': 'Studio',
                 'price': 500,
-                'story_limit': 25,
+                'credits': 6000,
                 'features': [
-                    '25 stories',
+                    '6000 credits',
                     'Image and Audio generation (can be stitched into video)',
                     'Export to PDF and Mp3 formats'
                 ]
@@ -121,9 +121,9 @@ DEFAULT_PRICING = {
                 'id': 3,
                 'name': 'Premium',
                 'price': 200,
-                'story_limit': 10,
+                'credits': 2500,
                 'features': [
-                    '10 stories',
+                    '2500 credits',
                     'Image and Audio generation (can be stitched into video)',
                     'Export to PDF and Mp3 formats'
                 ]
@@ -132,9 +132,9 @@ DEFAULT_PRICING = {
                 'id': 2,
                 'name': 'Standard',
                 'price': 100,
-                'story_limit': 4,
+                'credits': 1000,
                 'features': [
-                    '4 stories',
+                    '1000 credits',
                     'Image and Audio generation (can be stitched into video)',
                     'Export to PDF and Mp3 formats'
                 ]
@@ -143,9 +143,9 @@ DEFAULT_PRICING = {
                 'id': 1,
                 'name': 'Free',
                 'price': 0,
-                'story_limit': 1,
+                'credits': 100,
                 'features': [
-                    '1 story',
+                    '100 credit',
                     'Image and Audio generation (can be stitched into video)',
                     'Export to PDF and Mp3 formats'
                 ]
@@ -1710,7 +1710,7 @@ class PaymentView(APIView):
                                 )
 
                     # Add purchased credits to the user who made the payment
-                    credit_to_be_added = next(p for p in DEFAULT_PRICING[request.query_params.get('domain')]['plans'] if p['id'] == int(request.data.get('plan_id')))['story_limit']
+                    credit_to_be_added = next(p for p in DEFAULT_PRICING[request.query_params.get('domain')]['plans'] if p['id'] == int(request.data.get('plan_id')))['credits']
                     credits = order.user.credits.filter(is_active=True).first()
                     credits.credits_remaining += credit_to_be_added
                     credits.save()

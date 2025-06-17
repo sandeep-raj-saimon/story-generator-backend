@@ -23,8 +23,9 @@ redis_client = redis.Redis(
 
 class CreditDeductionMiddleware:
     """
-    Middleware to handle credit deduction for story saving.
+    Middleware to handle credit deduction for story saving and media generation.
     Deducts 1 credit when a story is saved.
+    Deducts credits for image/audio generation based on CREDIT_COSTS.
     """
     
     
@@ -33,7 +34,9 @@ class CreditDeductionMiddleware:
 
     def __call__(self, request):
         # Check if this is a story save endpoint
-        if request.method == 'POST' and 'stories' in request.path_info and not any(endpoint in request.path_info for endpoint in ['generate', 'segment', 'scenes']):
+
+        # Handle media generation endpoints (image/audio)
+        if request.method == 'POST' and any(endpoint in request.path_info for endpoint in ['generate-image', 'generate-audio', 'generate-bulk-image', 'generate-bulk-audio']):
             try:
                 # Get the JWT token from the Authorization header
                 auth_header = request.META.get('HTTP_AUTHORIZATION', '')
@@ -54,32 +57,99 @@ class CreditDeductionMiddleware:
                 user_id = decoded_token.get('user_id')
 
                 if user_id:
-                    with transaction.atomic():
-                        # Get user's active credits
-                        user_credits = Credits.objects.select_for_update().get(user_id=user_id, is_active=True)
+                    # Determine media type and credit cost
+                    media_type = None
+                    if 'image' in request.path_info:
+                        media_type = 'image'
+                    elif 'audio' in request.path_info:
+                        media_type = 'audio'
+                    
+                    if not media_type:
+                        return self.get_response(request)
+
+                    # Calculate credit cost
+                    credit_cost = 0
+                    if 'bulk' in request.path_info:
+                        # For bulk generation, we need to calculate total cost for all scenes
+                        # Extract story_id from path
+                        path_parts = request.path_info.split('/')
+                        story_id = None
+                        for i, part in enumerate(path_parts):
+                            if part == 'stories' and i + 1 < len(path_parts):
+                                story_id = path_parts[i + 1]
+                                break
                         
-                        # Check if user has enough credits
-                        if user_credits.credits_remaining < 1:
-                            response = Response(
-                                {'error': 'Insufficient credits to save story'},
-                                status=status.HTTP_402_PAYMENT_REQUIRED
-                            )
-                            response.accepted_renderer = JSONRenderer()
-                            response.accepted_media_type = "application/json"
-                            response.renderer_context = {}
-                            response.render()
-                            return response
+                        if story_id:
+                            # Get all scenes for the story
+                            scenes = Scene.objects.filter(story_id=story_id, is_active=True)
+                            if media_type == 'image':
+                                credit_cost = sum([math.ceil(CREDIT_COSTS['image']) for _ in scenes])
+                            elif media_type == 'audio':
+                                credit_cost = sum([math.ceil(CREDIT_COSTS['audio'] * len(scene.content)) for scene in scenes])
+                    else:
+                        # For single scene generation
+                        # Extract scene_id from path
+                        path_parts = request.path_info.split('/')
+                        scene_id = None
+                        for i, part in enumerate(path_parts):
+                            if part == 'scenes' and i + 1 < len(path_parts):
+                                scene_id = path_parts[i + 1]
+                                break
+                        
+                        if scene_id:
+                            scene = Scene.objects.filter(id=scene_id).first()
+                            if scene:
+                                if media_type == 'image':
+                                    credit_cost = math.ceil(CREDIT_COSTS['image'])
+                                elif media_type == 'audio':
+                                    credit_cost = math.ceil(CREDIT_COSTS['audio'] * len(scene.content))
 
-                        # Deduct 1 credit
-                        user_credits.credits_remaining -= 1
-                        user_credits.save()
+                    if credit_cost > 0:
+                        print(f"Credit cost: {credit_cost}")
+                        with transaction.atomic():
+                            # Get user's active credits
+                            user_credits = Credits.objects.select_for_update().get(user_id=user_id, is_active=True)
+                            
+                            # Check if user has enough credits
+                            if user_credits.credits_remaining < credit_cost:
+                                response = Response(
+                                    {'error': f'Insufficient credits for {media_type} generation. Required: {credit_cost}, Available: {user_credits.credits_remaining}'},
+                                    status=status.HTTP_402_PAYMENT_REQUIRED
+                                )
+                                response.accepted_renderer = JSONRenderer()
+                                response.accepted_media_type = "application/json"
+                                response.renderer_context = {}
+                                response.render()
+                                return response
 
-                        # Create credit transaction record
-                        CreditTransaction.objects.create(
-                            user_id=user_id,
-                            credits_used=1,
-                            transaction_type='debit'
-                        )
+                            # Deduct credits
+                            user_credits.credits_remaining -= credit_cost
+                            user_credits.save()
+
+                            # Create credit transaction record
+                            if 'bulk' in request.path_info:
+                                # For bulk generation, create one transaction for the total cost
+                                CreditTransaction.objects.create(
+                                    user_id=user_id,
+                                    credits_used=credit_cost,
+                                    transaction_type='debit'
+                                )
+                            else:
+                                # For single scene generation
+                                scene_id = None
+                                path_parts = request.path_info.split('/')
+                                for i, part in enumerate(path_parts):
+                                    if part == 'scenes' and i + 1 < len(path_parts):
+                                        scene_id = path_parts[i + 1]
+                                        break
+                                
+                                scene = Scene.objects.filter(id=scene_id).first() if scene_id else None
+                                CreditTransaction.objects.create(
+                                    user_id=user_id,
+                                    scene=scene,
+                                    credits_used=credit_cost,
+                                    transaction_type='debit'
+                                )
 
             except Exception as e:
                 response = Response(

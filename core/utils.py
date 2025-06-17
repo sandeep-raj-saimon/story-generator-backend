@@ -6,8 +6,8 @@ import redis
 import os
 
 CREDIT_COSTS = {
-        'image': 100,  # 1 credit per image
-        'audio': 0.3,  # 2 credits per audio
+        'image': 10,  # 10 credits per image
+        'audio': 0.25,  # 0.25 credits per audio
     }
 
 def redis_client():
