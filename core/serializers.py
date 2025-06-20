@@ -41,7 +41,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         # Create initial credits for the user
         Credits.objects.create(
             user=user,
-            credits_remaining=1,  # Default credits
+            credits_remaining=300,  # Default credits
             is_active=True
         )
         return user

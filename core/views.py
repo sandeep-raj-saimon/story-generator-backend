@@ -383,6 +383,7 @@ class StorySegmentAPIView(APIView):
                - Any special effects or unique visual elements
             4. The order number
             5. The dominant emotion (e.g., happy, tense, sad, hopeful)
+            6. Dont oversegment the story, just break it into logical scenes.
             Story: {story.content}
             
             Format the response as JSON with the following structure:
