@@ -65,7 +65,7 @@ DEFAULT_PRICING = {
                 'features': [
                     '6000 credits',
                     'Image and Audio generation (can be stitched into video)',
-                    'Export to PDF and Mp3 formats'
+                    'Export to PDF (only for English stories) and Mp3 formats'
                 ]
             },
             {
@@ -76,7 +76,7 @@ DEFAULT_PRICING = {
                 'features': [
                     '2500 credits',
                     'Image and Audio generation (can be stitched into video)',
-                    'Export to PDF and Mp3 formats'
+                    'Export to PDF (only for English stories) and Mp3 formats'
                 ]
             },
             {
@@ -87,7 +87,7 @@ DEFAULT_PRICING = {
                 'features': [
                     '1000 credits',
                     'Image and Audio generation (can be stitched into video)',
-                    'Export to PDF format'
+                    'Export to PDF (only for English stories) and Mp3 formats'
                 ]
             },
             {
@@ -98,7 +98,7 @@ DEFAULT_PRICING = {
                 'features': [
                     '100 credits',
                     'Image and Audio generation (can be stitched into video)',
-                    'Export to PDF and Mp3 formats'
+                    'Export to PDF (only for English stories) and Mp3 formats'
                 ]
             }
         ]
@@ -114,7 +114,7 @@ DEFAULT_PRICING = {
                 'features': [
                     '6000 credits',
                     'Image and Audio generation (can be stitched into video)',
-                    'Export to PDF and Mp3 formats'
+                    'Export to PDF (only for English stories) and Mp3 formats'
                 ]
             },
             {
@@ -125,7 +125,7 @@ DEFAULT_PRICING = {
                 'features': [
                     '2500 credits',
                     'Image and Audio generation (can be stitched into video)',
-                    'Export to PDF and Mp3 formats'
+                    'Export to PDF (only for English stories) and Mp3 formats'
                 ]
             },
             {
@@ -136,7 +136,7 @@ DEFAULT_PRICING = {
                 'features': [
                     '1000 credits',
                     'Image and Audio generation (can be stitched into video)',
-                    'Export to PDF and Mp3 formats'
+                    'Export to PDF (only for English stories) and Mp3 formats'
                 ]
             },
             {
@@ -147,7 +147,7 @@ DEFAULT_PRICING = {
                 'features': [
                     '100 credit',
                     'Image and Audio generation (can be stitched into video)',
-                    'Export to PDF and Mp3 formats'
+                    'Export to PDF (only for English stories) and Mp3 formats'
                 ]
             }
         ]
@@ -548,6 +548,7 @@ class SceneDetailAPIView(APIView):
                 job_data = {
                     'job_type': 'generate_media',
                     'user': request.user.id,
+                    'language': request.user.language,
                     'story': story_pk,
                     'scene': pk,
                     'request_data': {
@@ -820,6 +821,15 @@ class CurrentUserAPIView(APIView):
         """Get current user's details."""
         serializer = UserSerializer(request.user)
         return Response(serializer.data)
+    
+    def patch(self, request):
+        """Update user."""
+        user = request.user
+        serializer = UserSerializer(user, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 @method_decorator(csrf_exempt, name='dispatch')
 class UserRegistrationAPIView(APIView):
@@ -1800,7 +1810,7 @@ class StoryGenerateAPIView(APIView):
                     {"role": "system", "content": f"You are a creative story writer. Generate an engaging story of exactly 200 words in {'English-US' if request.user.language == 'en-US' else 'Hindi'}. Your response must be in JSON format with two fields: 'title' and 'content'. The title should be on a single line, and the content should be the story text."},
                     {"role": "user", "content": "Generate a story in JSON format with 'title' and 'content' fields."}
                 ],
-                max_tokens=500,
+                max_tokens=1500,
                 temperature=0.7,
                 response_format={ "type": "json_object" }
             )
@@ -1811,18 +1821,27 @@ class StoryGenerateAPIView(APIView):
             try:
                 # Parse the JSON response
                 story_data = json.loads(story_text)
+                
+                # Basic validation
+                if 'title' not in story_data or 'content' not in story_data:
+                    raise ValueError("Missing 'title' or 'content' in generated story")
+                    
                 # Deduct credits
                 return JsonResponse(story_data)
                 
             except json.JSONDecodeError as e:
                 error_traceback = traceback.format_exc()
-                print(f'Error parsing story generation response:')
-                print(f'Error: {str(e)}')
-                print('Traceback:')
-                print(error_traceback)
+                # Log the faulty response for debugging
+                print(f"--- JSON PARSE ERROR ---")
+                print(f"Error: {str(e)}")
+                print(f"Malformed story_text: {story_text}")
+                print(f"--- END JSON PARSE ERROR ---")
                 return JsonResponse(
-                    {"error": "Failed to parse story generation response",
-                     "traceback": error_traceback if settings.DEBUG else None},
+                    {
+                        "error": "Failed to parse story generation response from AI. The response was not valid JSON.",
+                        "details": str(e),
+                        "traceback": error_traceback if settings.DEBUG else None
+                    },
                     status=500
                 )
             except ValueError as e:
