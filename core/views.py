@@ -131,7 +131,7 @@ DEFAULT_PRICING = {
             {
                 'id': 2,
                 'name': 'Standard',
-                'price': 1,
+                'price': 100,
                 'credits': 1000,
                 'features': [
                     '1000 credits',
