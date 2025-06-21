@@ -253,7 +253,7 @@ class StoryDetailAPIView(APIView):
     def get(self, request, pk):
         """Retrieve a story."""
         story = self.get_object(pk)
-        if story.is_public:
+        if story.is_public or story.author == request.user:
             serializer = StorySerializer(story)
             return Response(serializer.data)
         else:
